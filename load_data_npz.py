@@ -2,28 +2,28 @@
 Description: 
 Author: Damocles_lin
 Date: 2025-07-28 18:39:30
-LastEditTime: 2025-07-29 13:02:34
+LastEditTime: 2025-07-29 16:30:48
 LastEditors: Damocles_lin
 '''
-# import numpy as np
-
-# # 加载npz文件
-# data = np.load('./reconstruction_data.npz', allow_pickle=True)
-
-# # 查看包含的所有数组的名称
-# print("包含的数组名称：", data.files)
-
-# # 遍历所有数组并查看
-# for name in data.files:
-#     print("="*50)
-#     print(f"\n数组'{name}'的形状：", data[name].shape)
-#     print(f"数组'{name}'的内容：\n", data[name])
-
-# # 关闭文件（可选，在上下文管理器中会自动关闭）
-# data.close()
 import numpy as np
 import os
 import json
+
+# 相机模型ID到名称的映射
+CAMERA_MODEL_NAMES = {
+    0: "SIMPLE_PINHOLE",
+    1: "PINHOLE",
+    2: "SIMPLE_RADIAL",
+    3: "RADIAL",
+    4: "OPENCV",
+    5: "OPENCV_FISHEYE",
+    6: "FULL_OPENCV",
+    7: "FOV",
+    8: "SIMPLE_RADIAL_FISHEYE",
+    9: "RADIAL_FISHEYE",
+    10: "THIN_PRISM_FISHEYE",
+    # 添加其他模型ID如果需要
+}
 
 def load_and_export_npz(npz_path, output_txt_path):
     """
@@ -50,7 +50,7 @@ def load_and_export_npz(npz_path, output_txt_path):
             if 'points' in data:
                 points = data['points']
                 f.write("=" * 80 + "\n")
-                f.write("点云数据 (Point Cloud)\n")
+                f.write(f"点云数据 (Point Cloud)\t数组形状：{data['points'].shape}\n")
                 f.write("=" * 80 + "\n")
                 f.write(f"总点数: {len(points):,}\n")
                 
@@ -70,7 +70,7 @@ def load_and_export_npz(npz_path, output_txt_path):
             if 'colors' in data:
                 colors = data['colors']
                 f.write("\n" + "=" * 80 + "\n")
-                f.write("颜色数据 (Colors)\n")
+                f.write(f"颜色数据 (Colors)\t数组形状：{data['colors'].shape}\n")
                 f.write("=" * 80 + "\n")
                 f.write(f"颜色点数: {len(colors):,}\n")
                 
@@ -83,7 +83,7 @@ def load_and_export_npz(npz_path, output_txt_path):
             if 'vertices' in data:
                 vertices = data['vertices']
                 f.write("\n" + "=" * 80 + "\n")
-                f.write("网格顶点数据 (Mesh Vertices)\n")
+                f.write(f"网格顶点数据 (Mesh Vertices)\t数组形状：{data['vertices'].shape}\n")
                 f.write("=" * 80 + "\n")
                 f.write(f"顶点数量: {len(vertices):,}\n")
                 
@@ -102,7 +102,7 @@ def load_and_export_npz(npz_path, output_txt_path):
             if 'triangles' in data:
                 triangles = data['triangles']
                 f.write("\n" + "=" * 80 + "\n")
-                f.write("网格三角形数据 (Mesh Triangles)\n")
+                f.write(f"网格三角形数据 (Mesh Triangles)\t数组形状：{data['triangles'].shape}\n")
                 f.write("=" * 80 + "\n")
                 f.write(f"三角形数量: {len(triangles):,}\n")
                 
@@ -115,13 +115,15 @@ def load_and_export_npz(npz_path, output_txt_path):
             if 'cameras' in data:
                 cameras = data['cameras'].item()
                 f.write("\n" + "=" * 80 + "\n")
-                f.write("相机参数 (Cameras)\n")
+                f.write(f"相机参数 (Cameras)\t数组形状：{data['cameras'].shape}\n")
                 f.write("=" * 80 + "\n")
                 f.write(f"相机数量: {len(cameras)}\n\n")
-                
+
                 for cam_id, cam_data in cameras.items():
                     f.write(f"相机 ID: {cam_id}\n")
-                    f.write(f"  模型: {cam_data['model']}\n")
+                    model_id = cam_data['model']
+                    model_name = CAMERA_MODEL_NAMES.get(model_id,f"未知模型{model_id}")
+                    f.write(f"  模型: {model_name}\n")
                     f.write(f"  宽度: {cam_data['width']}\n")
                     f.write(f"  高度: {cam_data['height']}\n")
                     f.write(f"  参数: {cam_data['params']}\n\n")
@@ -130,7 +132,7 @@ def load_and_export_npz(npz_path, output_txt_path):
             if 'images' in data:
                 images = data['images'].item()
                 f.write("\n" + "=" * 80 + "\n")
-                f.write("图像参数 (Images)\n")
+                f.write(f"图像参数 (Images)\t数组形状：{data['images'].shape}\n")
                 f.write("=" * 80 + "\n")
                 f.write(f"图像数量: {len(images)}\n\n")
                 

@@ -153,17 +153,25 @@ def create_intrinsic_matrix(camera_info):
     params = camera_info['params']
     
     if model_id == 0:   # SIMPLE_PINHOLE
-        f, cx, cy = params
-        return np.array([[f, 0, cx], [0, f, cy], [0, 0, 1]])
+        focal, cx, cy = params
+        return np.array([[focal, 0, cx], [0, focal, cy], [0, 0, 1]])
     elif model_id == 1:    # 'PINHOLE'
         fx, fy, cx, cy = params
         return np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
-    elif model_id == 2:    # 'SIMPLE_RADIAL'
-        f, cx, cy, k = params
-        return np.array([[f, 0, cx], [0, f, cy], [0, 0, 1]])
+    elif model_id in [2, 3]:    # RADIAL类型
+        focal, cx, cy, *_ = params
+        return np.array([[focal, 0, cx], [0, focal, cy], [0, 0, 1]])
+    elif model_id == 4:    # OPENCV
+        fx, fy, cx, cy, *_ = params
+        return np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
     else:
-        print(f"警告: 不支持的相机模型 '{model_name}'，使用单位矩阵代替")
-        return np.eye(3)
+        if len(params) >= 4:
+            # 取前四个参数，假设为fx, fy, cx, cy
+            fx, fy, cx, cy = params[:4]
+            return np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
+        else:
+            print(f"警告: 不支持的相机模型 '{model_name}'，使用单位矩阵代替")
+            return np.eye(3)
 
 # 示例使用
 if __name__ == "__main__":
