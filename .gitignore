@@ -2,3 +2,4 @@ images/
 output/
 results/
 __pycache__/
+.vscode/
