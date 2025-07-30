@@ -1,3 +1,4 @@
 images/
 output/
 results/
+__pycache__/
