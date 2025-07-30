@@ -2,7 +2,7 @@
 Description: 
 Author: Damocles_lin
 Date: 2025-07-29 20:25:16
-LastEditTime: 2025-07-29 20:35:27
+LastEditTime: 2025-07-29 22:40:00
 LastEditors: Damocles_lin
 '''
 import os
@@ -11,6 +11,7 @@ import subprocess
 import numpy as np
 import open3d as o3d
 import pycolmap
+import logging
 from typing import List, Optional, Tuple, Dict
 from utils import setup_logger, CAMERA_MODEL_NAMES
 
@@ -219,7 +220,7 @@ def save_reconstruction_data(
 def run_reconstruction_pipeline(
     image_dir: str, 
     output_dir: str, 
-    output_file: str = "reconstruction_data.npz"
+    results_dir: str,
 ) -> bool:
     """运行完整的重建流程"""
     logger.info(f"开始重建流程，输入目录: {image_dir}, 输出目录: {output_dir}")
@@ -237,8 +238,9 @@ def run_reconstruction_pipeline(
         return False
     
     # 保存重建数据
-    output_path = os.path.join(output_dir, output_file)
-    point_cloud, mesh = save_reconstruction_data(dense_dir, sparse_dir, output_path)
+    os.makedirs(results_dir, exist_ok=True)
+    results_path = os.path.join(results_dir, "reconstruction_data.npz")
+    point_cloud, mesh = save_reconstruction_data(dense_dir, sparse_dir, results_path)
     
     # 可视化结果
     if point_cloud:
@@ -259,7 +261,7 @@ def run_reconstruction_pipeline(
 
 if __name__ == "__main__":
     try:
-        success = run_reconstruction_pipeline("./images", "./output")
+        success = run_reconstruction_pipeline("./images", "./output", "./results")
         if not success:
             logger.error("重建流程失败")
             sys.exit(1)

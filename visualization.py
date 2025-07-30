@@ -2,7 +2,7 @@
 Description: 
 Author: Damocles_lin
 Date: 2025-07-29 20:26:58
-LastEditTime: 2025-07-29 20:43:55
+LastEditTime: 2025-07-29 22:14:10
 LastEditors: Damocles_lin
 '''
 import os
@@ -181,7 +181,7 @@ def run_visualization_pipeline(data_path: str, image_dir: str = "images") -> boo
 
 if __name__ == "__main__":
     try:
-        success = run_visualization_pipeline("reconstruction_data.npz")
+        success = run_visualization_pipeline("./results/reconstruction_data.npz")
         if not success:
             logger.error("可视化流程失败")
             sys.exit(1)

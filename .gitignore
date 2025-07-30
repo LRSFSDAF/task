@@ -1,5 +1,3 @@
-*.png
-*.txt
-*.npz
 images/
 output/
+results/
