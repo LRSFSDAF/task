@@ -2,12 +2,11 @@
 Description: 
 Author: Damocles_lin
 Date: 2025-07-29 20:27:35
-LastEditTime: 2025-07-29 20:34:00
+LastEditTime: 2025-07-31 00:11:50
 LastEditors: Damocles_lin
 '''
 import os
 import sys
-import json
 import numpy as np
 from utils import setup_logger, CAMERA_MODEL_NAMES
 
@@ -16,23 +15,16 @@ logger = setup_logger('data_export')
 def generate_report(data: dict, output_path: str) -> bool:
     """
     生成重建数据报告
-    
-    参数:
-        data: 加载的重建数据字典
-        output_path: 输出文件路径
-        
-    返回:
-        bool: 是否成功生成报告
     """
     try:
-        with open(output_path, 'w') as f:
+        with open(output_path, 'w', encoding='utf-8') as f:
             # 写入文件头
             f.write("=" * 80 + "\n")
             f.write(f"三维重建数据解析报告\n")
             f.write("=" * 80 + "\n\n")
             
             # 1. 点云数据
-            if 'points' in data:
+            if 'points' in data and data['points'] is not None:
                 points = data['points']
                 f.write("=" * 80 + "\n")
                 f.write(f"点云数据 (Point Cloud)\t数组形状：{points.shape}\n")
@@ -52,7 +44,7 @@ def generate_report(data: dict, output_path: str) -> bool:
                     f.write(f"  Point {i+1}: [{point[0]:.6f}, {point[1]:.6f}, {point[2]:.6f}]\n")
             
             # 2. 颜色数据
-            if 'colors' in data:
+            if 'colors' in data and data['colors'] is not None:
                 colors = data['colors']
                 f.write("\n" + "=" * 80 + "\n")
                 f.write(f"颜色数据 (Colors)\t数组形状：{colors.shape}\n")
@@ -65,7 +57,7 @@ def generate_report(data: dict, output_path: str) -> bool:
                     f.write(f"  Color {i+1}: [{color[0]:.2f}, {color[1]:.2f}, {color[2]:.2f}]\n")
             
             # 3. 网格顶点
-            if 'vertices' in data:
+            if 'vertices' in data and data['vertices'] is not None:
                 vertices = data['vertices']
                 f.write("\n" + "=" * 80 + "\n")
                 f.write(f"网格顶点数据 (Mesh Vertices)\t数组形状：{vertices.shape}\n")
@@ -83,8 +75,21 @@ def generate_report(data: dict, output_path: str) -> bool:
                 for i, vertex in enumerate(vertices[:10]):
                     f.write(f"  Vertex {i+1}: [{vertex[0]:.6f}, {vertex[1]:.6f}, {vertex[2]:.6f}]\n")
             
-            # 4. 网格三角形
-            if 'triangles' in data:
+            # 4. 网格顶点颜色 (新增部分)
+            if 'vertex_colors' in data and data['vertex_colors'] is not None:
+                vertex_colors = data['vertex_colors']
+                f.write("\n" + "=" * 80 + "\n")
+                f.write(f"网格顶点颜色 (Mesh Vertex Colors)\t数组形状：{vertex_colors.shape}\n")
+                f.write("=" * 80 + "\n")
+                f.write(f"顶点颜色数量: {len(vertex_colors):,}\n")
+                
+                # 输出前10个顶点颜色
+                f.write("\n前10个顶点颜色 (r, g, b):\n")
+                for i, color in enumerate(vertex_colors[:10]):
+                    f.write(f"  Vertex Color {i+1}: [{color[0]:.2f}, {color[1]:.2f}, {color[2]:.2f}]\n")
+            
+            # 5. 网格三角形
+            if 'triangles' in data and data['triangles'] is not None:
                 triangles = data['triangles']
                 f.write("\n" + "=" * 80 + "\n")
                 f.write(f"网格三角形数据 (Mesh Triangles)\t数组形状：{triangles.shape}\n")
@@ -96,8 +101,8 @@ def generate_report(data: dict, output_path: str) -> bool:
                 for i, triangle in enumerate(triangles[:10]):
                     f.write(f"  Triangle {i+1}: [{triangle[0]}, {triangle[1]}, {triangle[2]}]\n")
             
-            # 5. 相机参数
-            if 'cameras' in data:
+            # 6. 相机参数
+            if 'cameras' in data and data['cameras']:
                 cameras = data['cameras']
                 f.write("\n" + "=" * 80 + "\n")
                 f.write(f"相机参数 (Cameras)\n")
@@ -113,8 +118,8 @@ def generate_report(data: dict, output_path: str) -> bool:
                     f.write(f"  高度: {cam_data['height']}\n")
                     f.write(f"  参数: {cam_data['params']}\n\n")
             
-            # 6. 图像参数
-            if 'images' in data:
+            # 7. 图像参数
+            if 'images' in data and data['images']:
                 images = data['images']
                 f.write("\n" + "=" * 80 + "\n")
                 f.write(f"图像参数 (Images)\n")
@@ -136,7 +141,7 @@ def generate_report(data: dict, output_path: str) -> bool:
             
             # 添加文件结尾
             f.write("\n" + "=" * 80 + "\n")
-            f.write("数据解析完成\n")
+            f.write("报告生成时间: {}\n".format(np.datetime64('now')))
             f.write("=" * 80 + "\n")
         
         return True
@@ -147,13 +152,6 @@ def generate_report(data: dict, output_path: str) -> bool:
 def export_npz_to_report(npz_path: str, output_path: str) -> bool:
     """
     加载NPZ文件并导出为报告
-    
-    参数:
-        npz_path: NPZ文件路径
-        output_path: 输出报告路径
-        
-    返回:
-        bool: 是否成功导出
     """
     if not os.path.exists(npz_path):
         logger.error(f"输入文件不存在: {npz_path}")
@@ -170,6 +168,8 @@ def export_npz_to_report(npz_path: str, output_path: str) -> bool:
             else:
                 data_dict[key] = data[key]
         
+        # 确保输出目录存在
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
         return generate_report(data_dict, output_path)
     except Exception as e:
         logger.error(f"加载和导出数据失败: {str(e)}")
@@ -177,14 +177,8 @@ def export_npz_to_report(npz_path: str, output_path: str) -> bool:
 
 if __name__ == "__main__":
     # 输入文件路径
-    input_npz = "reconstruction_data.npz"
-    output_txt = "reconstruction_data_report.txt"
-    
-    # 检查文件是否存在
-    if not os.path.exists(input_npz):
-        logger.error(f"输入文件不存在: {input_npz}")
-        logger.error("请确保已运行重建流程生成数据")
-        sys.exit(1)
+    input_npz = "./results/reconstruction_data.npz"
+    output_txt = "./results/reconstruction_data_report.txt"
     
     # 导出数据
     if export_npz_to_report(input_npz, output_txt):

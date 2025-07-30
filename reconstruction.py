@@ -2,7 +2,7 @@
 Description: 
 Author: Damocles_lin
 Date: 2025-07-29 20:25:16
-LastEditTime: 2025-07-30 21:08:21
+LastEditTime: 2025-07-31 00:00:32
 LastEditors: Damocles_lin
 '''
 import os
@@ -12,7 +12,7 @@ import numpy as np
 import open3d as o3d
 import pycolmap
 import logging
-from typing import List, Optional, Tuple, Dict
+from typing import Dict, Tuple, Optional, List
 from utils import setup_logger, CAMERA_MODEL_NAMES
 
 logger = setup_logger('reconstruction')
@@ -23,7 +23,13 @@ def run_colmap_command(command: List[str], description: str) -> bool:
     logger.debug(f"命令: {' '.join(command)}")
     
     try:
-        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        result = subprocess.run(
+            command, 
+            check=True, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE,
+            text=True
+        )
         logger.debug(f"命令输出:\n{result.stdout}")
         return True
     except subprocess.CalledProcessError as e:
@@ -46,14 +52,14 @@ def run_colmap_pipeline(image_dir: str, output_dir: str) -> Optional[str]:
         'colmap', 'feature_extractor',
         '--database_path', database_path,
         '--image_path', image_dir,
-        '--ImageReader.single_camera', '1'
+        '--ImageReader.single_camera', '1',
     ], "特征提取"):
         return None
     
     # 2. 特征匹配
     if not run_colmap_command([
         'colmap', 'exhaustive_matcher',
-        '--database_path', database_path
+        '--database_path', database_path,
     ], "特征匹配"):
         return None
     
@@ -63,7 +69,7 @@ def run_colmap_pipeline(image_dir: str, output_dir: str) -> Optional[str]:
         'colmap', 'mapper',
         '--database_path', database_path,
         '--image_path', image_dir,
-        '--output_path', sparse_dir
+        '--output_path', sparse_dir,
     ], "稀疏重建"):
         return None
     
@@ -82,7 +88,7 @@ def run_colmap_pipeline(image_dir: str, output_dir: str) -> Optional[str]:
         'colmap', 'patch_match_stereo',
         '--workspace_path', dense_dir,
         '--workspace_format', 'COLMAP',
-        '--PatchMatchStereo.geom_consistency', 'true'
+        '--PatchMatchStereo.geom_consistency', 'true',
     ], "稠密匹配"):
         return None
     
@@ -122,7 +128,6 @@ def parse_colmap_data(sparse_dir: str) -> Tuple[Dict, Dict]:
     # 使用最新的模型目录
     latest_model_dir = os.path.join(sparse_dir, max(model_dirs, key=int))
     
-    # 使用pycolmap加载重建结果
     try:
         reconstruction = pycolmap.Reconstruction(latest_model_dir)
     except Exception as e:
@@ -159,63 +164,61 @@ def save_reconstruction_data(
     dense_dir: str, 
     sparse_dir: str, 
     output_path: str
-) -> Tuple[Optional[o3d.geometry.PointCloud], Optional[o3d.geometry.TriangleMesh]]:
+) -> bool:
     """保存重建结果数据到NPZ文件"""
-    fused_path = os.path.join(dense_dir, "fused.ply")
-    meshed_path = os.path.join(dense_dir, "meshed.ply")
-    
-    # 加载点云
-    if not os.path.exists(fused_path):
-        logger.error(f"点云文件不存在: {fused_path}")
-        return None, None
-    
     try:
-        point_cloud = o3d.io.read_point_cloud(fused_path)
-    except Exception as e:
-        logger.error(f"加载点云失败: {str(e)}")
-        point_cloud = None
-    
-    # 加载网格
-    mesh = None
-    if os.path.exists(meshed_path):
+        # 加载点云
+        fused_path = os.path.join(dense_dir, "fused.ply")
+        if not os.path.exists(fused_path):
+            logger.warning(f"点云文件不存在: {fused_path}")
+            point_cloud = None
+        else:
+            point_cloud = o3d.io.read_point_cloud(fused_path)
+        
+        # 加载网格
+        meshed_path = os.path.join(dense_dir, "meshed.ply")
+        mesh = None
+        if os.path.exists(meshed_path):
+            try:
+                mesh = o3d.io.read_triangle_mesh(meshed_path)
+                if mesh.has_vertices():
+                    mesh.compute_vertex_normals()
+            except Exception as e:
+                logger.warning(f"加载网格失败: {str(e)}")
+        
+        # 解析相机参数
         try:
-            mesh = o3d.io.read_triangle_mesh(meshed_path)
-            if mesh.has_vertices():
-                mesh.compute_vertex_normals()
+            cameras, images = parse_colmap_data(sparse_dir)
         except Exception as e:
-            logger.error(f"加载网格失败: {str(e)}")
-    
-    # 解析相机参数
-    try:
-        cameras, images = parse_colmap_data(sparse_dir)
-    except Exception as e:
-        logger.error(f"解析相机参数失败: {str(e)}")
-        return None, None
-    
-    # 准备保存数据
-    save_data = {
-        'cameras': cameras,
-        'images': images
-    }
-    
-    if point_cloud and point_cloud.has_points():
-        save_data['points'] = np.asarray(point_cloud.points)
-        if point_cloud.has_colors():
-            save_data['colors'] = np.asarray(point_cloud.colors)
-    
-    if mesh and mesh.has_vertices():
-        save_data['vertices'] = np.asarray(mesh.vertices)
-        if mesh.has_triangles():
-            save_data['triangles'] = np.asarray(mesh.triangles)
-    
-    # 保存到NPZ文件
-    try:
+            logger.error(f"解析相机参数失败: {str(e)}")
+            cameras, images = {}, {}
+        
+        # 准备保存数据
+        save_data = {
+            'cameras': cameras,
+            'images': images
+        }
+        
+        if point_cloud and point_cloud.has_points():
+            save_data['points'] = np.asarray(point_cloud.points)
+            if point_cloud.has_colors():
+                save_data['colors'] = np.asarray(point_cloud.colors)
+
+        if mesh and mesh.has_vertices():
+            save_data['vertices'] = np.asarray(mesh.vertices)
+            if mesh.has_triangles():
+                save_data['triangles'] = np.asarray(mesh.triangles)
+            if mesh.has_vertex_colors():
+                save_data['vertex_colors'] = np.asarray(mesh.vertex_colors)
+
+        # 保存到NPZ文件
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
         np.savez_compressed(output_path, **save_data)
         logger.info(f"重建数据已保存到 {output_path}")
+        return True
     except Exception as e:
         logger.error(f"保存重建数据失败: {str(e)}")
-    
-    return point_cloud, mesh
+        return False
 
 def run_reconstruction_pipeline(
     image_dir: str, 
@@ -240,32 +243,16 @@ def run_reconstruction_pipeline(
     # 保存重建数据
     os.makedirs(results_dir, exist_ok=True)
     results_path = os.path.join(results_dir, "reconstruction_data.npz")
-    point_cloud, mesh = save_reconstruction_data(dense_dir, sparse_dir, results_path)
+    if not save_reconstruction_data(dense_dir, sparse_dir, results_path):
+        return False
     
-    # 可视化结果
-    if point_cloud:
-        logger.info("可视化点云...")
-        try:
-            o3d.visualization.draw_geometries([point_cloud])
-        except Exception as e:
-            logger.error(f"点云可视化失败: {str(e)}")
-    
-    if mesh and mesh.has_vertices():
-        logger.info("可视化网格...")
-        try:
-            o3d.visualization.draw_geometries([mesh])
-        except Exception as e:
-            logger.error(f"网格可视化失败: {str(e)}")
-    
+    logger.info("重建流程成功完成")
     return True
 
 if __name__ == "__main__":
     try:
         success = run_reconstruction_pipeline("./images", "./output", "./results")
-        if not success:
-            logger.error("重建流程失败")
-            sys.exit(1)
-        logger.info("重建流程成功完成")
+        sys.exit(0 if success else 1)
     except Exception as e:
         logger.exception("重建过程中发生未处理的错误")
         sys.exit(1)
