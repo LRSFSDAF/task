@@ -2,7 +2,7 @@
 Description: 
 Author: Damocles_lin
 Date: 2025-07-29 20:22:45
-LastEditTime: 2025-07-30 23:52:12
+LastEditTime: 2025-07-31 15:21:03
 LastEditors: Damocles_lin
 '''
 import os
@@ -11,6 +11,7 @@ import logging
 import numpy as np
 import open3d as o3d
 from typing import Dict, Tuple, Optional, List, Any
+import time  # 新增时间模块
 
 # 相机模型映射
 CAMERA_MODEL_NAMES = {
@@ -27,20 +28,53 @@ CAMERA_MODEL_NAMES = {
     10: "THIN_PRISM_FISHEYE",
 }
 
-def setup_logger(name: str, log_level: int = logging.INFO) -> logging.Logger:
-    """配置并返回日志记录器"""
+def setup_logger(name: str, log_level: int = logging.INFO, log_file: Optional[str] = None) -> logging.Logger:
+    """配置并返回日志记录器，支持输出到文件"""
     logger = logging.getLogger(name)
     logger.setLevel(log_level)
     
-    if not logger.handlers:
-        handler = logging.StreamHandler(sys.stdout)
-        formatter = logging.Formatter(
+    # 清除现有处理器避免重复
+    if logger.hasHandlers():
+        logger.handlers.clear()
+    
+    # 创建控制台处理器
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    console_handler.setFormatter(console_formatter)
+    logger.addHandler(console_handler)
+    
+    # 创建文件处理器（如果提供了日志文件路径）
+    if log_file:
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        file_handler = logging.FileHandler(log_file)
+        file_formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
+        file_handler.setFormatter(file_formatter)
+        logger.addHandler(file_handler)
     
     return logger
+
+class Timer:
+    """计时器类"""
+    def __init__(self, name: str):
+        self.name = name
+        self.start_time = None
+        self.elapsed_time = 0.0
+        
+    def __enter__(self):
+        self.start_time = time.time()
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        end_time = time.time()
+        self.elapsed_time = end_time - self.start_time
+        
+    def get_elapsed(self) -> float:
+        """获取经过的时间（秒）"""
+        return self.elapsed_time
 
 def create_intrinsic_matrix(camera_info: Dict[str, Any]) -> np.ndarray:
     """根据相机信息创建内参矩阵"""
