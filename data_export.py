@@ -2,7 +2,7 @@
 Description: 
 Author: Damocles_lin
 Date: 2025-07-29 20:27:35
-LastEditTime: 2025-07-31 00:11:50
+LastEditTime: 2025-07-31 23:27:13
 LastEditors: Damocles_lin
 '''
 import os
@@ -15,6 +15,13 @@ logger = setup_logger('data_export')
 def generate_report(data: dict, output_path: str) -> bool:
     """
     生成重建数据报告
+    
+    参数:
+        data (dict): 重建数据字典
+        output_path (str): 报告输出路径
+        
+    返回:
+        bool: 报告生成是否成功
     """
     try:
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -152,6 +159,13 @@ def generate_report(data: dict, output_path: str) -> bool:
 def export_npz_to_report(npz_path: str, output_path: str) -> bool:
     """
     加载NPZ文件并导出为报告
+    
+    参数:
+        npz_path (str): NPZ文件路径
+        output_path (str): 报告输出路径
+        
+    返回:
+        bool: 导出是否成功
     """
     if not os.path.exists(npz_path):
         logger.error(f"输入文件不存在: {npz_path}")

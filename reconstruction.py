@@ -2,7 +2,7 @@
 Description: 
 Author: Damocles_lin
 Date: 2025-07-29 20:25:16
-LastEditTime: 2025-07-31 16:41:11
+LastEditTime: 2025-07-31 23:26:13
 LastEditors: Damocles_lin
 '''
 import os
@@ -20,7 +20,18 @@ import time
 logger = None
 
 def run_colmap_command(command: List[str], description: str) -> Tuple[bool, float]:
-    """运行COLMAP命令并检查结果，返回执行状态和耗时"""
+    """
+    运行COLMAP命令并检查结果
+    
+    参数:
+        command (List[str]): 要执行的命令列表
+        description (str): 命令描述
+        
+    返回:
+        Tuple[bool, float]: 
+            - 命令执行是否成功
+            - 执行耗时（秒）
+    """
     global logger
     logger.info(f"正在执行: {description}")
     logger.debug(f"命令: {' '.join(command)}")
@@ -68,7 +79,17 @@ def run_colmap_command(command: List[str], description: str) -> Tuple[bool, floa
         return False, elapsed
 
 def run_colmap_pipeline(image_dir: str, output_dir: str, time_log_file: str) -> Optional[str]:
-    """执行完整的COLMAP重建流程"""
+    """
+    执行完整的COLMAP重建流程
+    
+    参数:
+        image_dir (str): 输入图像目录
+        output_dir (str): 输出目录
+        time_log_file (str): 耗时日志文件路径
+        
+    返回:
+        Optional[str]: 成功时返回稠密重建目录，失败时返回None
+    """
     global logger
     os.makedirs(output_dir, exist_ok=True)
     database_path = os.path.join(output_dir, "database.db")
@@ -175,7 +196,17 @@ def run_colmap_pipeline(image_dir: str, output_dir: str, time_log_file: str) -> 
     return dense_dir
 
 def parse_colmap_data(sparse_dir: str) -> Tuple[Dict, Dict]:
-    """解析COLMAP输出的相机参数"""
+    """
+    解析COLMAP输出的相机参数
+    
+    参数:
+        sparse_dir (str): 稀疏重建目录路径
+        
+    返回:
+        Tuple[Dict, Dict]: 
+            - 相机参数字典
+            - 图像位姿字典
+    """
     global logger
     # 查找模型目录
     model_dirs = [
@@ -226,7 +257,17 @@ def save_reconstruction_data(
     sparse_dir: str, 
     results_path: str
 ) -> bool:
-    """保存重建结果数据到NPZ文件"""
+    """
+    保存重建结果数据到NPZ文件
+    
+    参数:
+        dense_dir (str): 稠密重建目录路径
+        sparse_dir (str): 稀疏重建目录路径
+        results_path (str): 结果文件保存路径
+        
+    返回:
+        bool: 保存是否成功
+    """
     global logger
     try:
         # 加载点云
@@ -287,7 +328,17 @@ def run_reconstruction_pipeline(
     output_dir: str, 
     results_dir: str,
 ) -> bool:
-    """运行完整的重建流程"""
+    """
+    运行完整的重建流程
+    
+    参数:
+        image_dir (str): 输入图像目录
+        output_dir (str): 输出目录
+        results_dir (str): 结果保存目录
+        
+    返回:
+        bool: 重建流程是否成功
+    """
     global logger
     logger.info(f"开始重建流程，输入目录: {image_dir}, 输出目录: {output_dir}, 结果目录：{results_dir}")
     

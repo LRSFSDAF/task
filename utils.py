@@ -2,7 +2,7 @@
 Description: 
 Author: Damocles_lin
 Date: 2025-07-29 20:22:45
-LastEditTime: 2025-07-31 15:21:03
+LastEditTime: 2025-07-31 23:49:31
 LastEditors: Damocles_lin
 '''
 import os
@@ -29,7 +29,17 @@ CAMERA_MODEL_NAMES = {
 }
 
 def setup_logger(name: str, log_level: int = logging.INFO, log_file: Optional[str] = None) -> logging.Logger:
-    """配置并返回日志记录器，支持输出到文件"""
+    """
+    配置并返回日志记录器，支持输出到控制台和文件
+    
+    参数:
+        name (str): 日志记录器的名称
+        log_level (int): 日志级别，默认为INFO
+        log_file (Optional[str]): 日志文件路径，如果为None则不输出到文件
+        
+    返回:
+        logging.Logger: 配置好的日志记录器
+    """
     logger = logging.getLogger(name)
     logger.setLevel(log_level)
     
@@ -59,7 +69,7 @@ def setup_logger(name: str, log_level: int = logging.INFO, log_file: Optional[st
 
 class Timer:
     """计时器类"""
-    def __init__(self, name: str):
+    def __init__(self, name: str):      
         self.name = name
         self.start_time = None
         self.elapsed_time = 0.0
@@ -77,7 +87,15 @@ class Timer:
         return self.elapsed_time
 
 def create_intrinsic_matrix(camera_info: Dict[str, Any]) -> np.ndarray:
-    """根据相机信息创建内参矩阵"""
+    """
+    根据相机信息创建内参矩阵
+    
+    参数:
+        camera_info (Dict[str, Any]): 包含相机模型ID和参数的字典
+        
+    返回:
+        np.ndarray: 3x3相机内参矩阵
+    """
     model_id = camera_info['model']
     params = camera_info['params']
     
@@ -110,7 +128,19 @@ def project_points_to_image(
     intrinsic: np.ndarray, 
     extrinsic: np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """将3D点投影到2D图像平面"""
+    """
+    将3D点投影到2D图像平面
+    
+    参数:
+        points3d (np.ndarray): Nx3的3D点坐标数组
+        intrinsic (np.ndarray): 3x3相机内参矩阵
+        extrinsic (np.ndarray): 4x4相机外参矩阵
+        
+    返回:
+        Tuple[np.ndarray, np.ndarray]: 
+            - 投影后的2D图像坐标
+            - 有效点的布尔掩码数组
+    """
     try:
         # 转换为齐次坐标
         points_homo = np.hstack([points3d, np.ones((points3d.shape[0], 1))])
@@ -132,7 +162,16 @@ def project_points_to_image(
         raise
 
 def load_colmap_data(path: str) -> Dict[str, Any]:
-    """加载COLMAP重建数据"""
+    """
+    加载COLMAP重建数据
+    
+    参数:
+        path (str): NPZ文件路径
+        
+    返回:
+        Dict[str, Any]: 包含点云、网格和相机参数的数据字典
+    """
+
     try:
         data = np.load(path, allow_pickle=True)
         return {
@@ -153,7 +192,17 @@ def visualize_geometry(
     window_name: str = "Open3D Viewer",
     save_path: Optional[str] = None
 ) -> bool:
-    """可视化Open3D几何对象"""
+    """
+    可视化Open3D几何对象
+    
+    参数:
+        geometry (o3d.geometry.Geometry): 要可视化的几何对象
+        window_name (str): 窗口名称
+        save_path (Optional[str]): 截图保存路径
+        
+    返回:
+        bool: 可视化是否成功
+    """
     try:
         vis = o3d.visualization.Visualizer()
         vis.create_window(window_name=window_name, width=1200, height=900)

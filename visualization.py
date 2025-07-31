@@ -2,7 +2,7 @@
 Description: 
 Author: Damocles_lin
 Date: 2025-07-29 20:26:58
-LastEditTime: 2025-07-30 23:53:14
+LastEditTime: 2025-08-01 01:00:26
 LastEditors: Damocles_lin
 '''
 import os
@@ -16,7 +16,16 @@ from utils import setup_logger, load_colmap_data, create_intrinsic_matrix, proje
 logger = setup_logger('visualization')
 
 def create_point_cloud(points: np.ndarray, colors: np.ndarray) -> o3d.geometry.PointCloud:
-    """创建点云对象"""
+    """
+    从点坐标和颜色数据创建Open3D点云对象
+    
+    参数:
+        points (np.ndarray): Nx3的点坐标数组
+        colors (np.ndarray): Nx3的点颜色数组
+        
+    返回:
+        o3d.geometry.PointCloud: 创建的点云对象
+    """
     if points.size == 0 or colors.size == 0:
         raise ValueError("点云数据为空")
     
@@ -26,7 +35,17 @@ def create_point_cloud(points: np.ndarray, colors: np.ndarray) -> o3d.geometry.P
     return pcd
 
 def create_mesh(vertices: np.ndarray, triangles: np.ndarray, vertex_colors: Optional[np.ndarray] = None) -> o3d.geometry.TriangleMesh:
-    """创建网格对象"""
+    """
+    从顶点、三角形和颜色数据创建Open3D网格对象
+    
+    参数:
+        vertices (np.ndarray): Mx3的顶点坐标数组
+        triangles (np.ndarray): Kx3的三角形索引数组
+        vertex_colors (Optional[np.ndarray]): Mx3的顶点颜色数组
+        
+    返回:
+        o3d.geometry.TriangleMesh: 创建的网格对象
+    """
     if vertices is None or triangles is None:
         raise ValueError("网格数据无效")
     
@@ -46,7 +65,16 @@ def create_mesh(vertices: np.ndarray, triangles: np.ndarray, vertex_colors: Opti
     return mesh
 
 def visualize_camera_poses(extrinsics: List[np.ndarray], size: float = 0.1) -> o3d.geometry.LineSet:
-    """创建表示相机位姿的坐标系集合"""
+    """
+    创建表示相机位姿的坐标系集合
+    
+    参数:
+        extrinsics (List[np.ndarray]): 相机外参矩阵列表
+        size (float): 坐标系大小，默认为0.1
+        
+    返回:
+        o3d.geometry.LineSet: 包含相机坐标系的线集对象
+    """
     camera_poses = o3d.geometry.LineSet()
     points_all = []
     lines_all = []
@@ -80,8 +108,18 @@ def visualize_camera_poses(extrinsics: List[np.ndarray], size: float = 0.1) -> o
     
     return camera_poses
 
-def visualize_projection(image_path: str, points2d: np.ndarray, save_path: str = "./results/projection_result.png") -> bool:
-    """在2D图像上可视化投影点"""
+def visualize_projection(image_path: str, points2d: np.ndarray, save_path: str) -> bool:
+    """
+    在2D图像上可视化投影点
+    
+    参数:
+        image_path (str): 输入图像路径
+        points2d (np.ndarray): Nx2的2D点坐标数组
+        save_path (str): 结果保存路径
+        
+    返回:
+        bool: 可视化是否成功
+    """
     if not os.path.exists(image_path):
         logger.error(f"图像文件不存在: {image_path}")
         return False
@@ -112,8 +150,18 @@ def visualize_projection(image_path: str, points2d: np.ndarray, save_path: str =
         logger.error(f"可视化投影失败: {str(e)}")
         return False
 
-def run_visualization_pipeline(data_path: str, image_dir: str = "images", output_dir: str = "./results") -> bool:
-    """运行完整的可视化流程"""
+def run_visualization_pipeline(data_path: str, image_dir: str, output_dir: str) -> bool:
+    """
+    运行完整的可视化流程
+    
+    参数:
+        data_path (str): 重建数据文件路径
+        image_dir (str): 原始图像目录路径
+        output_dir (str): 输出结果目录路径
+        
+    返回:
+        bool: 可视化流程是否成功
+    """
     logger.info(f"开始可视化流程，数据文件: {data_path}")
     
     # 加载重建数据
@@ -198,8 +246,13 @@ def run_visualization_pipeline(data_path: str, image_dir: str = "images", output
     return True
 
 if __name__ == "__main__":
+
+    # 数据路径
+    data_path = "./results/reconstruction_data.npz"
+    images_dir = "./images"
+    output_dir = "./results/png"
     try:
-        success = run_visualization_pipeline("./results/reconstruction_data.npz")
+        success = run_visualization_pipeline(data_path, images_dir, output_dir)
         sys.exit(0 if success else 1)
     except Exception as e:
         logger.exception("可视化过程中发生未处理的错误")
