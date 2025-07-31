@@ -1,8 +1,8 @@
 '''
-Description: 
+Description: 3D可视化工具 - 使用PyOpenGL嵌入渲染
 Author: Damocles_lin
 Date: 2025-07-29 20:27:35
-LastEditTime: 2025-07-29 22:31:10
+LastEditTime: 2025-08-01 01:51:11
 LastEditors: Damocles_lin
 '''
 import sys
@@ -12,40 +12,344 @@ import open3d as o3d
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QFileDialog, QLabel, QMessageBox, QGroupBox,
-    QGridLayout, QFrame, QSizePolicy, QTextEdit
+    QGridLayout, QFrame, QSizePolicy, QTextEdit, QSplitter, 
+    QOpenGLWidget
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize
-from PyQt5.QtGui import QIcon, QFont, QPalette, QColor
-from utils import setup_logger, load_colmap_data, visualize_geometry
+from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtGui import (
+    QIcon, QFont, QPalette, QColor, QOpenGLVersionProfile,
+    QOpenGLBuffer, QOpenGLVertexArrayObject, QOpenGLShaderProgram, QOpenGLShader
+)
+from utils import setup_logger, load_colmap_data, create_intrinsic_matrix, project_points_to_image
+import logging
+from OpenGL import GL as gl
+from OpenGL import GLU as glu
 
 logger = setup_logger('gui')
 
-class VisualizationThread(QThread):
-    """用于在独立线程中运行Open3D可视化的线程"""
-    finished = pyqtSignal()
-    error = pyqtSignal(str)
-    
-    def __init__(self, geometry, window_name="Open3D Viewer"):
-        super().__init__()
-        self.geometry = geometry
-        self.window_name = window_name
+class OpenGLRenderer(QOpenGLWidget):
+    """使用PyOpenGL渲染3D场景的Widget"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumSize(800, 600)
         
-    def run(self):
-        try:
-            success = visualize_geometry(self.geometry, self.window_name)
-            if not success:
-                self.error.emit("可视化失败")
-        except Exception as e:
-            self.error.emit(f"可视化错误: {str(e)}")
-        finally:
-            self.finished.emit()
+        # 场景数据
+        self.point_cloud = None
+        self.mesh = None
+        self.camera_poses = None
+        
+        # 相机参数
+        self.camera_distance = 5.0
+        self.camera_rotation_x = 0.0
+        self.camera_rotation_y = 0.0
+        self.camera_translation = [0.0, 0.0, 0.0]
+        
+        # 鼠标交互
+        self.last_mouse_pos = None
+        self.rotation_sensitivity = 0.5
+        self.translation_sensitivity = 0.01
+        self.zoom_sensitivity = 0.1
+        
+        # OpenGL对象
+        self.shader_program = None
+        self.vao = None
+        self.vbo = None
+
+    def initializeGL(self):
+        """初始化OpenGL上下文"""
+        # 设置基本OpenGL状态
+        gl.glClearColor(0.1, 0.1, 0.1, 1.0)
+        gl.glEnable(gl.GL_DEPTH_TEST)
+        gl.glEnable(gl.GL_POINT_SMOOTH)
+        gl.glPointSize(2.0)
+        gl.glEnable(gl.GL_BLEND)
+        gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+        
+        # 创建着色器程序
+        self.create_shaders()
+        
+        # 创建顶点数组对象
+        self.vao = QOpenGLVertexArrayObject()
+        if self.vao.create():
+            self.vao.bind()
+        else:
+            logger.error("无法创建顶点数组对象")
+        
+        # 初始化模型视图矩阵
+        gl.glMatrixMode(gl.GL_MODELVIEW)
+        gl.glLoadIdentity()
+        gl.glTranslatef(0, 0, -5)  # 初始相机位置
+
+    def create_shaders(self):
+        """创建着色器程序"""
+        # 顶点着色器
+        vertex_shader = """
+            #version 330 core
+            layout (location = 0) in vec3 position;
+            layout (location = 1) in vec3 color;
+            uniform mat4 model;
+            uniform mat4 view;
+            uniform mat4 projection;
+            out vec3 fragColor;
+            void main() {
+                gl_Position = projection * view * model * vec4(position, 1.0);
+                fragColor = color;
+            }
+        """
+        
+        # 片段着色器
+        fragment_shader = """
+            #version 330 core
+            in vec3 fragColor;
+            out vec4 FragColor;
+            void main() {
+                FragColor = vec4(fragColor, 1.0);
+            }
+        """
+        
+        # 编译着色器
+        self.shader_program = QOpenGLShaderProgram()
+        self.shader_program.addShaderFromSourceCode(QOpenGLShader.Vertex, vertex_shader)
+        self.shader_program.addShaderFromSourceCode(QOpenGLShader.Fragment, fragment_shader)
+        self.shader_program.link()
+        
+        if not self.shader_program.isLinked():
+            logger.error("着色器链接失败: " + self.shader_program.log())
+            return False
+        return True
+
+    def resizeGL(self, w, h):
+        """调整窗口大小"""
+        gl.glViewport(0, 0, w, h)
+        aspect = w / h if h > 0 else 1.0
+        
+        # 设置投影矩阵
+        gl.glMatrixMode(gl.GL_PROJECTION)
+        gl.glLoadIdentity()
+        glu.gluPerspective(45, aspect, 0.1, 100.0)
+        
+        # 切换回模型视图矩阵
+        gl.glMatrixMode(gl.GL_MODELVIEW)
+        gl.glLoadIdentity()
+
+    def paintGL(self):
+        """渲染场景"""
+        # 清除缓冲区
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+        
+        # 设置模型视图矩阵
+        gl.glMatrixMode(gl.GL_MODELVIEW)
+        gl.glLoadIdentity()
+        
+        # 应用相机变换
+        gl.glTranslatef(*self.camera_translation)
+        gl.glTranslatef(0, 0, -self.camera_distance)
+        gl.glRotatef(self.camera_rotation_x, 1, 0, 0)
+        gl.glRotatef(self.camera_rotation_y, 0, 1, 0)
+        
+        # 绘制坐标轴
+        self.draw_axes()
+        
+        # 绘制点云
+        if self.point_cloud:
+            self.draw_point_cloud()
+        
+        # 绘制网格
+        if self.mesh:
+            self.draw_mesh()
+        
+        # 绘制相机位姿
+        if self.camera_poses:
+            self.draw_camera_poses()
+
+    def draw_axes(self):
+        """绘制坐标轴"""
+        gl.glBegin(gl.GL_LINES)
+        # x轴 - 红色
+        gl.glColor3f(1, 0, 0)
+        gl.glVertex3f(0, 0, 0)
+        gl.glVertex3f(1, 0, 0)
+        
+        # y轴 - 绿色
+        gl.glColor3f(0, 1, 0)
+        gl.glVertex3f(0, 0, 0)
+        gl.glVertex3f(0, 1, 0)
+        
+        # z轴 - 蓝色
+        gl.glColor3f(0, 0, 1)
+        gl.glVertex3f(0, 0, 0)
+        gl.glVertex3f(0, 0, 1)
+        gl.glEnd()
+
+    def draw_point_cloud(self):
+        """绘制点云"""
+        if 'points' not in self.point_cloud or 'colors' not in self.point_cloud:
+            return
+            
+        points = self.point_cloud['points']
+        colors = self.point_cloud['colors']
+        
+        gl.glBegin(gl.GL_POINTS)
+        for i in range(len(points)):
+            gl.glColor3f(colors[i][0], colors[i][1], colors[i][2])
+            gl.glVertex3f(points[i][0], points[i][1], points[i][2])
+        gl.glEnd()
+
+    def draw_mesh(self):
+        """绘制网格"""
+        if 'vertices' not in self.mesh or 'triangles' not in self.mesh:
+            return
+            
+        vertices = self.mesh['vertices']
+        triangles = self.mesh['triangles']
+        colors = self.mesh.get('colors', np.ones_like(vertices) * 0.7)
+        
+        # 绘制网格面
+        gl.glBegin(gl.GL_TRIANGLES)
+        for tri in triangles:
+            for idx in tri:
+                if idx < len(colors):  # 确保索引有效
+                    gl.glColor3f(colors[idx][0], colors[idx][1], colors[idx][2])
+                else:
+                    gl.glColor3f(0.7, 0.7, 0.7)  # 默认颜色
+                if idx < len(vertices):  # 确保索引有效
+                    gl.glVertex3f(vertices[idx][0], vertices[idx][1], vertices[idx][2])
+        gl.glEnd()
+        
+        # 绘制网格线 - 使用线框模式
+        gl.glPolygonMode(gl.GL_FRONT_AND_BACK, gl.GL_LINE)
+        gl.glLineWidth(1.0)
+        gl.glColor3f(0.2, 0.2, 0.2)  # 线框颜色
+        gl.glBegin(gl.GL_TRIANGLES)
+        for tri in triangles:
+            for idx in tri:
+                if idx < len(vertices):
+                    gl.glVertex3f(vertices[idx][0], vertices[idx][1], vertices[idx][2])
+        gl.glEnd()
+        gl.glPolygonMode(gl.GL_FRONT_AND_BACK, gl.GL_FILL)
+
+    def draw_camera_poses(self):
+        """绘制相机位姿"""
+        for extrinsic in self.camera_poses:
+            # 计算相机在世界坐标系中的位置
+            R = extrinsic[:3, :3]
+            t = extrinsic[:3, 3]
+            camera_center = -R.T @ t
+            
+            # 坐标系大小
+            size = 0.1
+            
+            # 计算坐标系方向
+            x_dir = R[:, 0] * size
+            y_dir = R[:, 1] * size
+            z_dir = R[:, 2] * size
+            
+            # 绘制相机坐标系
+            gl.glBegin(gl.GL_LINES)
+            # x轴 - 红色
+            gl.glColor3f(1, 0, 0)
+            gl.glVertex3f(*camera_center)
+            gl.glVertex3f(*(camera_center + x_dir))
+            
+            # y轴 - 绿色
+            gl.glColor3f(0, 1, 0)
+            gl.glVertex3f(*camera_center)
+            gl.glVertex3f(*(camera_center + y_dir))
+            
+            # z轴 - 蓝色
+            gl.glColor3f(0, 0, 1)
+            gl.glVertex3f(*camera_center)
+            gl.glVertex3f(*(camera_center + z_dir))
+            gl.glEnd()
+
+    def set_point_cloud(self, points, colors):
+        """设置点云数据"""
+        # 计算点云中心并调整位置
+        if len(points) > 0:
+            center = np.mean(points, axis=0)
+            # 将点云移动到原点附近
+            points = points - center
+        else:
+            center = np.array([0, 0, 0])
+        
+        self.point_cloud = {
+            'points': points,
+            'colors': colors,
+            'center': center
+        }
+        self.update()
+
+    def set_mesh(self, vertices, triangles, colors=None):
+        """设置网格数据"""
+        if colors is None:
+            colors = np.ones_like(vertices) * 0.7
+            
+        # 计算网格中心并调整位置
+        if len(vertices) > 0:
+            center = np.mean(vertices, axis=0)
+            # 将网格移动到原点附近
+            vertices = vertices - center
+        else:
+            center = np.array([0, 0, 0])
+        
+        self.mesh = {
+            'vertices': vertices,
+            'triangles': triangles,
+            'colors': colors,
+            'center': center
+        }
+        self.update()
+
+    def set_camera_poses(self, extrinsics):
+        """设置相机位姿"""
+        self.camera_poses = extrinsics
+        self.update()
+
+    def reset_view(self):
+        """重置视图"""
+        self.camera_distance = 5.0
+        self.camera_rotation_x = 0.0
+        self.camera_rotation_y = 0.0
+        self.camera_translation = [0.0, 0.0, 0.0]
+        self.update()
+
+    def mousePressEvent(self, event):
+        """鼠标按下事件"""
+        self.last_mouse_pos = event.pos()
+
+    def mouseMoveEvent(self, event):
+        """鼠标移动事件"""
+        if self.last_mouse_pos is None:
+            return
+            
+        dx = event.x() - self.last_mouse_pos.x()
+        dy = event.y() - self.last_mouse_pos.y()
+        
+        if event.buttons() & Qt.LeftButton:
+            # 旋转
+            self.camera_rotation_x += dy * self.rotation_sensitivity
+            self.camera_rotation_y += dx * self.rotation_sensitivity
+        elif event.buttons() & Qt.RightButton:
+            # 平移
+            self.camera_translation[0] += dx * self.translation_sensitivity
+            self.camera_translation[1] -= dy * self.translation_sensitivity
+        
+        self.last_mouse_pos = event.pos()
+        self.update()
+
+    def wheelEvent(self, event):
+        """鼠标滚轮事件 - 缩放"""
+        delta = event.angleDelta().y()
+        self.camera_distance += delta * self.zoom_sensitivity * -0.1
+        self.camera_distance = max(0.1, min(self.camera_distance, 50.0))
+        self.update()
 
 class MainWindow(QMainWindow):
     """主窗口 - 3D重建查看器"""
     def __init__(self):
         super().__init__()
         self.setWindowTitle("三维重建可视化工具")
-        self.setGeometry(100, 100, 800, 600)
+        self.setGeometry(100, 100, 1200, 800)
         
         # 设置应用图标
         if hasattr(sys, '_MEIPASS'):
@@ -86,6 +390,20 @@ class MainWindow(QMainWindow):
         title_layout.addWidget(subtitle_label)
         main_layout.addWidget(title_frame)
         
+        # 创建OpenGL渲染器
+        self.gl_widget = OpenGLRenderer()
+        
+        # 创建控制按钮
+        control_frame = QFrame()
+        control_layout = QHBoxLayout(control_frame)
+        
+        self.btn_reset_view = QPushButton("重置视图")
+        self.btn_reset_view.setFixedHeight(40)
+        self.btn_reset_view.clicked.connect(self.gl_widget.reset_view)
+        
+        control_layout.addWidget(self.btn_reset_view)
+        control_layout.addStretch()
+        
         # 文件操作区域
         file_group = QGroupBox("文件操作")
         file_group.setFont(QFont("Arial", 10, QFont.Bold))
@@ -114,8 +432,6 @@ class MainWindow(QMainWindow):
         grid_layout.addWidget(self.btn_load_npz, 1, 0)
         grid_layout.addWidget(self.btn_help, 1, 1)
         
-        main_layout.addWidget(file_group)
-        
         # 文件路径显示区域
         path_group = QGroupBox("当前文件")
         path_group.setFont(QFont("Arial", 10, QFont.Bold))
@@ -128,8 +444,6 @@ class MainWindow(QMainWindow):
         self.file_path_label.setStyleSheet("padding: 8px; background-color: #f8f9fa; border-radius: 3px;")
         self.file_path_label.setWordWrap(True)
         path_layout.addWidget(self.file_path_label)
-        
-        main_layout.addWidget(path_group)
         
         # 状态区域
         status_group = QGroupBox("状态信息")
@@ -145,14 +459,28 @@ class MainWindow(QMainWindow):
         self.status_display.setPlaceholderText("状态信息将显示在这里...")
         status_layout.addWidget(self.status_display)
         
-        main_layout.addWidget(status_group)
+        # 创建分割器
+        splitter = QSplitter(Qt.Vertical)
+        
+        # 创建上部分组件
+        top_widget = QWidget()
+        top_layout = QVBoxLayout(top_widget)
+        top_layout.addWidget(file_group)
+        top_layout.addWidget(path_group)
+        top_layout.addWidget(status_group)
+        
+        # 添加组件到分割器
+        splitter.addWidget(top_widget)
+        splitter.addWidget(self.gl_widget)
+        splitter.setSizes([300, 600])
+        
+        # 添加到主布局
+        main_layout.addWidget(control_frame)
+        main_layout.addWidget(splitter)
         
         # 底部状态栏
         self.statusBar().setFont(QFont("Arial", 8))
         self.statusBar().showMessage("就绪")
-        
-        # 存储当前可视化线程
-        self.visualization_threads = []
         
         # 设置主窗口样式
         self.setStyleSheet("""
@@ -224,15 +552,16 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "错误", "无法加载点云文件或文件为空")
                 return
             
-            # 启动可视化线程
-            window_name = f"点云查看器: {os.path.basename(file_path)}"
-            thread = VisualizationThread(pcd, window_name)
-            thread.finished.connect(lambda: self.on_visualization_finished(thread))
-            thread.error.connect(self.handle_visualization_error)
-            thread.start()
+            # 获取点云数据
+            points = np.asarray(pcd.points)
+            colors = np.asarray(pcd.colors) if pcd.has_colors() else np.ones_like(points) * 0.7
             
-            self.visualization_threads.append(thread)
+            # 设置到OpenGL渲染器
+            self.gl_widget.set_point_cloud(points, colors)
+            self.gl_widget.reset_view()
+            
             self.update_status(f"已加载: {os.path.basename(file_path)}")
+            self.update_status(f"点数: {len(points):,}")
         except Exception as e:
             self.update_status(f"错误: {str(e)}")
             QMessageBox.critical(self, "错误", f"加载点云失败:\n{str(e)}")
@@ -258,15 +587,17 @@ class MainWindow(QMainWindow):
             
             mesh.compute_vertex_normals()
             
-            # 启动可视化线程
-            window_name = f"网格查看器: {os.path.basename(file_path)}"
-            thread = VisualizationThread(mesh, window_name)
-            thread.finished.connect(lambda: self.on_visualization_finished(thread))
-            thread.error.connect(self.handle_visualization_error)
-            thread.start()
+            # 获取网格数据
+            vertices = np.asarray(mesh.vertices)
+            triangles = np.asarray(mesh.triangles)
+            colors = np.asarray(mesh.vertex_colors) if mesh.has_vertex_colors() else np.ones_like(vertices) * 0.7
             
-            self.visualization_threads.append(thread)
+            # 设置到OpenGL渲染器
+            self.gl_widget.set_mesh(vertices, triangles, colors)
+            self.gl_widget.reset_view()
+            
             self.update_status(f"已加载: {os.path.basename(file_path)}")
+            self.update_status(f"顶点数: {len(vertices):,}, 面片数: {len(triangles):,}")
         except Exception as e:
             self.update_status(f"错误: {str(e)}")
             QMessageBox.critical(self, "错误", f"加载网格失败:\n{str(e)}")
@@ -301,54 +632,41 @@ class MainWindow(QMainWindow):
                 
             if choice == QMessageBox.Yes and 'points' in data and data['points'].size > 0:
                 # 可视化点云
-                pcd = o3d.geometry.PointCloud()
-                pcd.points = o3d.utility.Vector3dVector(data['points'])
-                if 'colors' in data:
-                    pcd.colors = o3d.utility.Vector3dVector(data['colors'])
+                points = data['points']
+                colors = data.get('colors', np.ones_like(points) * 0.7)
                 
-                window_name = f"重建点云: {os.path.basename(file_path)}"
-                thread = VisualizationThread(pcd, window_name)
+                # 获取相机位姿
+                extrinsics = [img['extrinsic'] for img in data['images'].values()]
+                
+                # 设置到OpenGL渲染器
+                self.gl_widget.set_point_cloud(points, colors)
+                self.gl_widget.set_camera_poses(extrinsics)
+                self.gl_widget.reset_view()
+                
                 self.update_status(f"可视化点云: {os.path.basename(file_path)}")
+                self.update_status(f"点数: {len(points):,}, 相机数: {len(extrinsics)}")
             
             elif choice == QMessageBox.No and 'vertices' in data and data['vertices'] is not None:
                 # 可视化网格
-                mesh = o3d.geometry.TriangleMesh()
-                mesh.vertices = o3d.utility.Vector3dVector(data['vertices'])
-                if 'triangles' in data:
-                    mesh.triangles = o3d.utility.Vector3iVector(data['triangles'])
-                mesh.compute_vertex_normals()
+                vertices = data['vertices']
+                triangles = data['triangles']
+                colors = data.get('vertex_colors', np.ones_like(vertices) * 0.7)
                 
-                window_name = f"重建网格: {os.path.basename(file_path)}"
-                thread = VisualizationThread(mesh, window_name)
+                # 设置到OpenGL渲染器
+                self.gl_widget.set_mesh(vertices, triangles, colors)
+                self.gl_widget.reset_view()
+                
                 self.update_status(f"可视化网格: {os.path.basename(file_path)}")
+                self.update_status(f"顶点数: {len(vertices):,}, 面片数: {len(triangles):,}")
             else:
                 self.update_status("错误: 没有可用的可视化数据")
                 QMessageBox.warning(self, "错误", "重建数据中没有点云或网格信息")
                 return
             
-            thread.finished.connect(lambda: self.on_visualization_finished(thread))
-            thread.error.connect(self.handle_visualization_error)
-            thread.start()
-            self.visualization_threads.append(thread)
-            
         except Exception as e:
             self.update_status(f"错误: {str(e)}")
             QMessageBox.critical(self, "错误", f"加载重建数据失败:\n{str(e)}")
             logger.error(f"加载重建数据失败: {str(e)}")
-    
-    def on_visualization_finished(self, thread):
-        """可视化线程完成时的处理"""
-        try:
-            if thread in self.visualization_threads:
-                self.visualization_threads.remove(thread)
-                self.update_status("可视化窗口已关闭")
-        except Exception as e:
-            logger.error(f"处理可视化完成时出错: {str(e)}")
-    
-    def handle_visualization_error(self, message):
-        """处理可视化错误"""
-        self.update_status(f"错误: {message}")
-        QMessageBox.critical(self, "可视化错误", message)
     
     def show_help(self):
         """显示帮助信息"""
@@ -362,24 +680,18 @@ class MainWindow(QMainWindow):
             "   - 鼠标左键拖动: 旋转视图\n"
             "   - 鼠标右键拖动: 平移视图\n"
             "   - 鼠标滚轮: 缩放视图\n"
-            "   - K键: 锁定/解锁视角\n"
-            "   - R键: 重置视图\n\n"
-            "3. 关闭窗口:\n"
-            "   - 直接关闭3D窗口即可\n\n"
-            "注意: 每个文件会在单独的窗口中打开"
+            "   - 点击'重置视图'按钮恢复初始视角\n\n"
+            "3. 相机位姿显示:\n"
+            "   - 加载重建数据时选择点云选项，会同时显示相机位姿\n"
+            "   - 红色轴: X轴, 绿色轴: Y轴, 蓝色轴: Z轴\n\n"
+            "4. 状态信息:\n"
+            "   - 底部状态栏显示当前操作状态\n"
+            "   - 状态信息区域显示详细日志"
         )
         QMessageBox.information(self, "帮助", help_text)
     
     def closeEvent(self, event):
         """关闭主窗口时清理所有资源"""
-        # 尝试停止所有可视化线程
-        for thread in self.visualization_threads:
-            try:
-                if thread.isRunning():
-                    thread.terminate()
-            except:
-                pass
-        
         event.accept()
 
 def run_gui():
