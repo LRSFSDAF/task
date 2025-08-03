@@ -2,7 +2,7 @@
 Description: 3D可视化工具 - 使用PyOpenGL嵌入渲染
 Author: Damocles_lin
 Date: 2025-07-29 20:27:35
-LastEditTime: 2025-08-04 00:25:01
+LastEditTime: 2025-08-04 00:38:29
 LastEditors: Damocles_lin
 '''
 import sys
@@ -53,9 +53,9 @@ class OpenGLRenderer(QOpenGLWidget):
         
         # 鼠标交互
         self.last_mouse_pos = None
-        self.rotation_sensitivity = 0.5
-        self.translation_sensitivity = 0.01
-        self.zoom_sensitivity = 0.1
+        self.rotation_sensitivity = 0.2
+        self.translation_sensitivity = 0.005
+        self.zoom_sensitivity = 0.05
 
         # OpenGL对象
         self.shader_program = None
@@ -433,25 +433,38 @@ class OpenGLRenderer(QOpenGLWidget):
         # 确保在OpenGL上下文中释放资源
         self.makeCurrent()
         
-        # 清除VBO
-        if self.vbo_point:
-            self.vbo_point.destroy()
-            self.vbo_point = None
-        if self.vao_point:
-            self.vao_point.destroy()
+        # 清除点云VBO和VAO
+        if self.vao_point is not None:
+            if self.vao_point.isCreated():
+                self.vao_point.destroy()
             self.vao_point = None
-        if self.vbo_mesh:
-            self.vbo_mesh.destroy()
-            self.vbo_mesh = None
-        if self.vao_mesh:
-            self.vao_mesh.destroy()
+        
+        if self.vbo_point is not None:
+            if self.vbo_point.isCreated():
+                self.vbo_point.destroy()
+            self.vbo_point = None
+        
+        # 清除网格VBO和VAO
+        if self.vao_mesh is not None:
+            if self.vao_mesh.isCreated():
+                self.vao_mesh.destroy()
             self.vao_mesh = None
-        if self.vbo_cameras:
-            self.vbo_cameras.destroy()
-            self.vbo_cameras = None
-        if self.vao_cameras:
-            self.vao_cameras.destroy()
+        
+        if self.vbo_mesh is not None:
+            if self.vbo_mesh.isCreated():
+                self.vbo_mesh.destroy()
+            self.vbo_mesh = None
+        
+        # 清除相机位姿VBO和VAO
+        if self.vao_cameras is not None:
+            if self.vao_cameras.isCreated():
+                self.vao_cameras.destroy()
             self.vao_cameras = None
+        
+        if self.vbo_cameras is not None:
+            if self.vbo_cameras.isCreated():
+                self.vbo_cameras.destroy()
+            self.vbo_cameras = None
         
         self.doneCurrent()
         
