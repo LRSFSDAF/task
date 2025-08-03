@@ -2,7 +2,7 @@
 Description: 
 Author: Damocles_lin
 Date: 2025-07-29 20:25:16
-LastEditTime: 2025-07-31 23:26:13
+LastEditTime: 2025-08-01 12:38:50
 LastEditors: Damocles_lin
 '''
 import os
@@ -371,7 +371,7 @@ def run_reconstruction_pipeline(
 if __name__ == "__main__":
 
     # 设置文件路径
-    input_dir = "./images"
+    input_dir = "./data/images-little-prince"
     output_dir = "./output"
     results_dir = "./results"
 

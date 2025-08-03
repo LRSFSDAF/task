@@ -2,7 +2,7 @@
 Description: 3D可视化工具 - 使用PyOpenGL嵌入渲染
 Author: Damocles_lin
 Date: 2025-07-29 20:27:35
-LastEditTime: 2025-08-01 01:51:11
+LastEditTime: 2025-08-03 22:20:17
 LastEditors: Damocles_lin
 '''
 import sys
@@ -312,6 +312,15 @@ class OpenGLRenderer(QOpenGLWidget):
         self.camera_rotation_y = 0.0
         self.camera_translation = [0.0, 0.0, 0.0]
         self.update()
+        
+    def clear_scene(self):
+        """清除当前场景中的所有对象"""
+        self.point_cloud = None
+        self.mesh = None
+        self.camera_poses = None
+        self.reset_view()
+        self.update_status = "场景已清除"  # 状态信息
+        self.update()
 
     def mousePressEvent(self, event):
         """鼠标按下事件"""
@@ -365,118 +374,86 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         
         # 主布局
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setAlignment(Qt.AlignTop)
+        main_layout = QHBoxLayout(central_widget)
         main_layout.setSpacing(15)
         main_layout.setContentsMargins(15, 15, 15, 15)
-        
-        # 标题区域
-        title_frame = QFrame()
-        title_frame.setFrameShape(QFrame.StyledPanel)
-        title_frame.setStyleSheet("background-color: #f0f0f0; border-radius: 5px;")
-        title_layout = QVBoxLayout(title_frame)
-        
-        title_label = QLabel("三维重建可视化工具")
-        title_label.setFont(QFont("Arial", 18, QFont.Bold))
-        title_label.setAlignment(Qt.AlignCenter)
-        title_label.setStyleSheet("color: #2c3e50; padding: 10px;")
-        
-        subtitle_label = QLabel("加载和查看点云、网格和重建数据")
-        subtitle_label.setFont(QFont("Arial", 10))
-        subtitle_label.setAlignment(Qt.AlignCenter)
-        subtitle_label.setStyleSheet("color: #7f8c8d; padding-bottom: 10px;")
-        
-        title_layout.addWidget(title_label)
-        title_layout.addWidget(subtitle_label)
-        main_layout.addWidget(title_frame)
-        
+
         # 创建OpenGL渲染器
         self.gl_widget = OpenGLRenderer()
+
+        # 左侧控制面板
+        left_panel = QWidget()
+        left_panel.setFixedWidth(300)  # 固定宽度
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setAlignment(Qt.AlignTop)
+        left_layout.setSpacing(15)
         
-        # 创建控制按钮
-        control_frame = QFrame()
-        control_layout = QHBoxLayout(control_frame)
+        # 视图控制按钮
+        view_control_group = QGroupBox("视图控制")
+        view_control_layout = QHBoxLayout(view_control_group)
         
         self.btn_reset_view = QPushButton("重置视图")
         self.btn_reset_view.setFixedHeight(40)
         self.btn_reset_view.clicked.connect(self.gl_widget.reset_view)
         
-        control_layout.addWidget(self.btn_reset_view)
-        control_layout.addStretch()
+        self.btn_clear_view = QPushButton("清除视图")
+        self.btn_clear_view.setFixedHeight(40)
+        self.btn_clear_view.clicked.connect(self.clear_view)
+        self.btn_clear_view.setStyleSheet("background-color: #e74c3c; color: white;")  # 红色按钮突出显示
+        
+        view_control_layout.addWidget(self.btn_reset_view)
+        view_control_layout.addWidget(self.btn_clear_view)
         
         # 文件操作区域
         file_group = QGroupBox("文件操作")
-        file_group.setFont(QFont("Arial", 10, QFont.Bold))
-        file_group.setStyleSheet("QGroupBox { border: 1px solid #bdc3c7; border-radius: 5px; margin-top: 10px; }"
-                                "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }")
-        
-        grid_layout = QGridLayout(file_group)
-        grid_layout.setSpacing(15)
+        file_layout = QGridLayout(file_group)
+        file_layout.setSpacing(15)
         
         # 创建按钮
-        self.btn_load_pcd = self.create_button("加载点云", "#3498db", "point_cloud.png")
+        self.btn_load_pcd = self.create_button("加载点云", "point_cloud.png")
         self.btn_load_pcd.clicked.connect(self.load_point_cloud)
         
-        self.btn_load_mesh = self.create_button("加载网格", "#2ecc71", "mesh.png")
+        self.btn_load_mesh = self.create_button("加载网格", "mesh.png")
         self.btn_load_mesh.clicked.connect(self.load_mesh)
         
-        self.btn_load_npz = self.create_button("加载重建数据", "#9b59b6", "reconstruction.png")
+        self.btn_load_npz = self.create_button("加载重建数据", "reconstruction.png")
         self.btn_load_npz.clicked.connect(self.load_reconstruction_data)
         
-        self.btn_help = self.create_button("帮助", "#e74c3c", "help.png")
+        self.btn_help = self.create_button("帮助", "help.png")
         self.btn_help.clicked.connect(self.show_help)
         
         # 添加到网格布局
-        grid_layout.addWidget(self.btn_load_pcd, 0, 0)
-        grid_layout.addWidget(self.btn_load_mesh, 0, 1)
-        grid_layout.addWidget(self.btn_load_npz, 1, 0)
-        grid_layout.addWidget(self.btn_help, 1, 1)
+        file_layout.addWidget(self.btn_load_pcd, 0, 0)
+        file_layout.addWidget(self.btn_load_mesh, 0, 1)
+        file_layout.addWidget(self.btn_load_npz, 1, 0)
+        file_layout.addWidget(self.btn_help, 1, 1)
         
-        # 文件路径显示区域
-        path_group = QGroupBox("当前文件")
-        path_group.setFont(QFont("Arial", 10, QFont.Bold))
-        path_group.setStyleSheet("QGroupBox { border: 1px solid #bdc3c7; border-radius: 5px; }"
-                                "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }")
+        # 信息显示区域
+        info_group = QGroupBox("信息显示")
+        info_layout = QVBoxLayout(info_group)
         
-        path_layout = QVBoxLayout(path_group)
-        self.file_path_label = QLabel("未加载任何文件")
-        self.file_path_label.setFont(QFont("Arial", 9))
-        self.file_path_label.setStyleSheet("padding: 8px; background-color: #f8f9fa; border-radius: 3px;")
-        self.file_path_label.setWordWrap(True)
-        path_layout.addWidget(self.file_path_label)
+        self.info_display = QTextEdit()
+        self.info_display.setFont(QFont("Arial", 9))
+        self.info_display.setReadOnly(True)
+        self.info_display.setStyleSheet("""
+            QTextEdit {
+                background-color: #f8f9fa; 
+                border: 1px solid #e0e0e0; 
+                border-radius: 3px;
+                padding: 8px;
+            }
+        """)
+        self.info_display.setPlaceholderText("文件信息和状态信息将显示在这里...")
+        info_layout.addWidget(self.info_display)
         
-        # 状态区域
-        status_group = QGroupBox("状态信息")
-        status_group.setFont(QFont("Arial", 10, QFont.Bold))
-        status_group.setStyleSheet("QGroupBox { border: 1px solid #bdc3c7; border-radius: 5px; }"
-                                  "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }")
-        
-        status_layout = QVBoxLayout(status_group)
-        self.status_display = QTextEdit()
-        self.status_display.setFont(QFont("Arial", 9))
-        self.status_display.setReadOnly(True)
-        self.status_display.setStyleSheet("background-color: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 3px;")
-        self.status_display.setPlaceholderText("状态信息将显示在这里...")
-        status_layout.addWidget(self.status_display)
-        
-        # 创建分割器
-        splitter = QSplitter(Qt.Vertical)
-        
-        # 创建上部分组件
-        top_widget = QWidget()
-        top_layout = QVBoxLayout(top_widget)
-        top_layout.addWidget(file_group)
-        top_layout.addWidget(path_group)
-        top_layout.addWidget(status_group)
-        
-        # 添加组件到分割器
-        splitter.addWidget(top_widget)
-        splitter.addWidget(self.gl_widget)
-        splitter.setSizes([300, 600])
+        # 添加组件到左侧面板
+        left_layout.addWidget(view_control_group)
+        left_layout.addWidget(file_group)
+        left_layout.addWidget(info_group)
         
         # 添加到主布局
-        main_layout.addWidget(control_frame)
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(left_panel)
+        main_layout.addWidget(self.gl_widget)
         
         # 底部状态栏
         self.statusBar().setFont(QFont("Arial", 8))
@@ -487,31 +464,40 @@ class MainWindow(QMainWindow):
             QMainWindow {
                 background-color: #ecf0f1;
             }
-            QPushButton {
+            QGroupBox {
                 font-weight: bold;
+                border: 1px solid #bdc3c7;
                 border-radius: 5px;
-                padding: 10px;
-                color: white;
+                margin-top: 10px;
             }
-            QPushButton:hover {
-                opacity: 0.9;
-            }
-            QPushButton:pressed {
-                padding: 9px;
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
             }
         """)
     
-    def create_button(self, text, color, icon_name=None):
+    def create_button(self, text, icon_name=None):
         """创建带样式的按钮"""
         button = QPushButton(text)
         button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         button.setMinimumHeight(70)
-        button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {color};
+        button.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
                 color: white;
                 font-size: 12px;
-            }}
+                font-weight: bold;
+                border-radius: 5px;
+                padding: 10px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+            QPushButton:pressed {
+                padding: 9px;
+                background-color: #1c638e;
+            }
         """)
         
         # 尝试添加图标
@@ -530,7 +516,7 @@ class MainWindow(QMainWindow):
     
     def update_status(self, message):
         """更新状态显示"""
-        self.status_display.append(f"> {message}")
+        self.info_display.append(f"> {message}")
         self.statusBar().showMessage(message)
         QApplication.processEvents()
     
@@ -543,7 +529,6 @@ class MainWindow(QMainWindow):
             return
             
         self.update_status(f"正在加载点云: {os.path.basename(file_path)}...")
-        self.file_path_label.setText(file_path)
         
         try:
             pcd = o3d.io.read_point_cloud(file_path)
@@ -576,7 +561,6 @@ class MainWindow(QMainWindow):
             return
             
         self.update_status(f"正在加载网格: {os.path.basename(file_path)}...")
-        self.file_path_label.setText(file_path)
         
         try:
             mesh = o3d.io.read_triangle_mesh(file_path)
@@ -612,7 +596,6 @@ class MainWindow(QMainWindow):
             return
             
         self.update_status(f"正在加载重建数据: {os.path.basename(file_path)}...")
-        self.file_path_label.setText(file_path)
         
         try:
             data = load_colmap_data(file_path)
@@ -680,15 +663,21 @@ class MainWindow(QMainWindow):
             "   - 鼠标左键拖动: 旋转视图\n"
             "   - 鼠标右键拖动: 平移视图\n"
             "   - 鼠标滚轮: 缩放视图\n"
-            "   - 点击'重置视图'按钮恢复初始视角\n\n"
+            "   - 点击'重置视图'按钮恢复初始视角\n"
+            "   - 点击'清除视图'按钮移除所有对象并重置视图\n\n"
             "3. 相机位姿显示:\n"
             "   - 加载重建数据时选择点云选项，会同时显示相机位姿\n"
             "   - 红色轴: X轴, 绿色轴: Y轴, 蓝色轴: Z轴\n\n"
-            "4. 状态信息:\n"
+            "4. 信息显示:\n"
             "   - 底部状态栏显示当前操作状态\n"
-            "   - 状态信息区域显示详细日志"
+            "   - 信息框显示详细日志和文件信息"
         )
         QMessageBox.information(self, "帮助", help_text)
+    
+    def clear_view(self):
+        """清除当前视图中的所有对象"""
+        self.gl_widget.clear_scene()
+        self.update_status("已清除所有对象并重置视图")
     
     def closeEvent(self, event):
         """关闭主窗口时清理所有资源"""

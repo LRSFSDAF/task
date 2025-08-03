@@ -2,7 +2,7 @@
 Description: 
 Author: Damocles_lin
 Date: 2025-07-29 20:26:58
-LastEditTime: 2025-08-01 01:00:26
+LastEditTime: 2025-08-03 21:27:10
 LastEditors: Damocles_lin
 '''
 import os
@@ -215,8 +215,8 @@ def run_visualization_pipeline(data_path: str, image_dir: str, output_dir: str) 
     if 'images' in data and data['images'] and 'points' in data and data['points'].size > 0:
         logger.info("执行投影验证...")
         
-        # 选择第一张图像
-        image_name = list(data['images'].keys())[0]
+        # 选择一张图像
+        image_name = list(data['images'].keys())[10]
         image_info = data['images'][image_name]
         camera_id = image_info['camera_id']
         
@@ -249,7 +249,7 @@ if __name__ == "__main__":
 
     # 数据路径
     data_path = "./results/reconstruction_data.npz"
-    images_dir = "./images"
+    images_dir = "./data/images-little-prince"
     output_dir = "./results/png"
     try:
         success = run_visualization_pipeline(data_path, images_dir, output_dir)
