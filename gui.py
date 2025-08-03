@@ -2,7 +2,7 @@
 Description: 3D可视化工具 - 使用PyOpenGL嵌入渲染
 Author: Damocles_lin
 Date: 2025-07-29 20:27:35
-LastEditTime: 2025-08-03 22:20:17
+LastEditTime: 2025-08-04 00:25:01
 LastEditors: Damocles_lin
 '''
 import sys
@@ -17,8 +17,9 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtGui import (
-    QIcon, QFont, QPalette, QColor, QOpenGLVersionProfile,
-    QOpenGLBuffer, QOpenGLVertexArrayObject, QOpenGLShaderProgram, QOpenGLShader
+    QIcon, QFont, QPalette, QColor,
+    QOpenGLBuffer, QOpenGLVertexArrayObject, QOpenGLShaderProgram, QOpenGLShader,
+    QSurfaceFormat
 )
 from utils import setup_logger, load_colmap_data, create_intrinsic_matrix, project_points_to_image
 import logging
@@ -28,11 +29,17 @@ from OpenGL import GLU as glu
 logger = setup_logger('gui')
 
 class OpenGLRenderer(QOpenGLWidget):
-    """使用PyOpenGL渲染3D场景的Widget"""
+    """使用PyOpenGL渲染3D场景的Widget（使用VBO）"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumSize(800, 600)
-        
+
+        # 设置OpenGL版本为3.3核心模式
+        fmt = QSurfaceFormat()
+        fmt.setVersion(3, 3)
+        fmt.setProfile(QSurfaceFormat.CoreProfile)
+        self.setFormat(fmt)
+
         # 场景数据
         self.point_cloud = None
         self.mesh = None
@@ -49,40 +56,33 @@ class OpenGLRenderer(QOpenGLWidget):
         self.rotation_sensitivity = 0.5
         self.translation_sensitivity = 0.01
         self.zoom_sensitivity = 0.1
-        
+
         # OpenGL对象
         self.shader_program = None
-        self.vao = None
-        self.vbo = None
+        self.vao_point = None
+        self.vbo_point = None
+        self.n_points = 0
+
+        self.vao_mesh = None
+        self.vbo_mesh = None
+        self.n_mesh_indices = 0
+        
+        # 新增：坐标轴和相机位姿的VBO
+        self.vao_axes = None
+        self.vbo_axes = None
+        self.vao_cameras = None
+        self.vbo_cameras = None
+        self.n_camera_vertices = 0
 
     def initializeGL(self):
-        """初始化OpenGL上下文"""
-        # 设置基本OpenGL状态
         gl.glClearColor(0.1, 0.1, 0.1, 1.0)
         gl.glEnable(gl.GL_DEPTH_TEST)
-        gl.glEnable(gl.GL_POINT_SMOOTH)
-        gl.glPointSize(2.0)
         gl.glEnable(gl.GL_BLEND)
         gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
-        
-        # 创建着色器程序
         self.create_shaders()
-        
-        # 创建顶点数组对象
-        self.vao = QOpenGLVertexArrayObject()
-        if self.vao.create():
-            self.vao.bind()
-        else:
-            logger.error("无法创建顶点数组对象")
-        
-        # 初始化模型视图矩阵
-        gl.glMatrixMode(gl.GL_MODELVIEW)
-        gl.glLoadIdentity()
-        gl.glTranslatef(0, 0, -5)  # 初始相机位置
+        self.create_axes_vbo()  # 创建坐标轴的VBO
 
     def create_shaders(self):
-        """创建着色器程序"""
-        # 顶点着色器
         vertex_shader = """
             #version 330 core
             layout (location = 0) in vec3 position;
@@ -90,14 +90,14 @@ class OpenGLRenderer(QOpenGLWidget):
             uniform mat4 model;
             uniform mat4 view;
             uniform mat4 projection;
+            uniform float pointSize;  // 添加点大小控制
             out vec3 fragColor;
             void main() {
                 gl_Position = projection * view * model * vec4(position, 1.0);
                 fragColor = color;
+                gl_PointSize = pointSize;  // 设置点大小
             }
         """
-        
-        # 片段着色器
         fragment_shader = """
             #version 330 core
             in vec3 fragColor;
@@ -106,207 +106,318 @@ class OpenGLRenderer(QOpenGLWidget):
                 FragColor = vec4(fragColor, 1.0);
             }
         """
-        
-        # 编译着色器
         self.shader_program = QOpenGLShaderProgram()
         self.shader_program.addShaderFromSourceCode(QOpenGLShader.Vertex, vertex_shader)
         self.shader_program.addShaderFromSourceCode(QOpenGLShader.Fragment, fragment_shader)
         self.shader_program.link()
-        
         if not self.shader_program.isLinked():
             logger.error("着色器链接失败: " + self.shader_program.log())
             return False
         return True
 
+    def create_axes_vbo(self):
+        """创建坐标轴的VBO"""
+        # 坐标轴数据：位置和颜色
+        # 每个顶点6个float：位置(3) + 颜色(3)
+        vertices = [
+            # X轴 (红色)
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            1.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            
+            # Y轴 (绿色)
+            0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+            0.0, 1.0, 0.0, 0.0, 1.0, 0.0,
+            
+            # Z轴 (蓝色)
+            0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+            0.0, 0.0, 1.0, 0.0, 0.0, 1.0
+        ]
+        vertices = np.array(vertices, dtype=np.float32)
+        
+        self.vao_axes = QOpenGLVertexArrayObject()
+        self.vao_axes.create()
+        self.vao_axes.bind()
+        
+        self.vbo_axes = QOpenGLBuffer(QOpenGLBuffer.VertexBuffer)
+        self.vbo_axes.create()
+        self.vbo_axes.bind()
+        self.vbo_axes.allocate(vertices.tobytes(), vertices.nbytes)
+        
+        # 设置顶点属性
+        gl.glEnableVertexAttribArray(0)
+        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, 24, gl.ctypes.c_void_p(0))
+        gl.glEnableVertexAttribArray(1)
+        gl.glVertexAttribPointer(1, 3, gl.GL_FLOAT, gl.GL_FALSE, 24, gl.ctypes.c_void_p(12))
+        
+        self.vbo_axes.release()
+        self.vao_axes.release()
+
     def resizeGL(self, w, h):
-        """调整窗口大小"""
         gl.glViewport(0, 0, w, h)
-        aspect = w / h if h > 0 else 1.0
-        
-        # 设置投影矩阵
-        gl.glMatrixMode(gl.GL_PROJECTION)
-        gl.glLoadIdentity()
-        glu.gluPerspective(45, aspect, 0.1, 100.0)
-        
-        # 切换回模型视图矩阵
-        gl.glMatrixMode(gl.GL_MODELVIEW)
-        gl.glLoadIdentity()
 
     def paintGL(self):
-        """渲染场景"""
-        # 清除缓冲区
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
-        
-        # 设置模型视图矩阵
-        gl.glMatrixMode(gl.GL_MODELVIEW)
-        gl.glLoadIdentity()
-        
-        # 应用相机变换
-        gl.glTranslatef(*self.camera_translation)
-        gl.glTranslatef(0, 0, -self.camera_distance)
-        gl.glRotatef(self.camera_rotation_x, 1, 0, 0)
-        gl.glRotatef(self.camera_rotation_y, 0, 1, 0)
-        
-        # 绘制坐标轴
-        self.draw_axes()
-        
+        if not self.shader_program or not self.shader_program.isLinked():
+            return
+
+        self.shader_program.bind()
+        # 构建模型、视图、投影矩阵
+        projection = self.projection_matrix()
+        model = self.model_matrix()
+        view = self.view_matrix()
+
+        self.shader_program.setUniformValue("model", model)
+        self.shader_program.setUniformValue("view", view)
+        self.shader_program.setUniformValue("projection", projection)
+
+        # 绘制坐标轴（使用VBO）
+        if self.vao_axes:
+            self.vao_axes.bind()
+            gl.glDrawArrays(gl.GL_LINES, 0, 6)  # 6个顶点
+            self.vao_axes.release()
+
         # 绘制点云
-        if self.point_cloud:
-            self.draw_point_cloud()
-        
+        if self.vao_point and self.n_points > 0:
+            # 确保着色器程序已绑定
+            self.shader_program.bind()
+            self.shader_program.setUniformValue("pointSize", 2.0)  # 设置点大小
+            
+            self.vao_point.bind()
+            gl.glDrawArrays(gl.GL_POINTS, 0, self.n_points)
+            self.vao_point.release()
+
         # 绘制网格
-        if self.mesh:
-            self.draw_mesh()
-        
-        # 绘制相机位姿
-        if self.camera_poses:
-            self.draw_camera_poses()
+        if self.vao_mesh and self.n_mesh_indices > 0:
+            # 确保着色器程序已绑定
+            self.shader_program.bind()
+            
+            self.vao_mesh.bind()
+            gl.glPolygonMode(gl.GL_FRONT_AND_BACK, gl.GL_FILL)
+            gl.glDrawArrays(gl.GL_TRIANGLES, 0, self.n_mesh_indices)
+            self.vao_mesh.release()
 
-    def draw_axes(self):
-        """绘制坐标轴"""
-        gl.glBegin(gl.GL_LINES)
-        # x轴 - 红色
-        gl.glColor3f(1, 0, 0)
-        gl.glVertex3f(0, 0, 0)
-        gl.glVertex3f(1, 0, 0)
+        # 绘制相机位姿（使用VBO）
+        if self.vao_cameras and self.n_camera_vertices > 0:
+            # 确保着色器程序已绑定
+            self.shader_program.bind()
+            
+            self.vao_cameras.bind()
+            gl.glDrawArrays(gl.GL_LINES, 0, self.n_camera_vertices)
+            self.vao_cameras.release()
         
-        # y轴 - 绿色
-        gl.glColor3f(0, 1, 0)
-        gl.glVertex3f(0, 0, 0)
-        gl.glVertex3f(0, 1, 0)
-        
-        # z轴 - 蓝色
-        gl.glColor3f(0, 0, 1)
-        gl.glVertex3f(0, 0, 0)
-        gl.glVertex3f(0, 0, 1)
-        gl.glEnd()
+        self.shader_program.release()
 
-    def draw_point_cloud(self):
-        """绘制点云"""
-        if 'points' not in self.point_cloud or 'colors' not in self.point_cloud:
-            return
-            
-        points = self.point_cloud['points']
-        colors = self.point_cloud['colors']
-        
-        gl.glBegin(gl.GL_POINTS)
-        for i in range(len(points)):
-            gl.glColor3f(colors[i][0], colors[i][1], colors[i][2])
-            gl.glVertex3f(points[i][0], points[i][1], points[i][2])
-        gl.glEnd()
+    def projection_matrix(self):
+        import PyQt5.QtGui as QtGui
+        w, h = self.width(), self.height()
+        aspect = w / h if h > 0 else 1.0
+        perspective = QtGui.QMatrix4x4()
+        perspective.perspective(45, aspect, 0.1, 100.0)
+        return perspective
 
-    def draw_mesh(self):
-        """绘制网格"""
-        if 'vertices' not in self.mesh or 'triangles' not in self.mesh:
-            return
-            
-        vertices = self.mesh['vertices']
-        triangles = self.mesh['triangles']
-        colors = self.mesh.get('colors', np.ones_like(vertices) * 0.7)
-        
-        # 绘制网格面
-        gl.glBegin(gl.GL_TRIANGLES)
-        for tri in triangles:
-            for idx in tri:
-                if idx < len(colors):  # 确保索引有效
-                    gl.glColor3f(colors[idx][0], colors[idx][1], colors[idx][2])
-                else:
-                    gl.glColor3f(0.7, 0.7, 0.7)  # 默认颜色
-                if idx < len(vertices):  # 确保索引有效
-                    gl.glVertex3f(vertices[idx][0], vertices[idx][1], vertices[idx][2])
-        gl.glEnd()
-        
-        # 绘制网格线 - 使用线框模式
-        gl.glPolygonMode(gl.GL_FRONT_AND_BACK, gl.GL_LINE)
-        gl.glLineWidth(1.0)
-        gl.glColor3f(0.2, 0.2, 0.2)  # 线框颜色
-        gl.glBegin(gl.GL_TRIANGLES)
-        for tri in triangles:
-            for idx in tri:
-                if idx < len(vertices):
-                    gl.glVertex3f(vertices[idx][0], vertices[idx][1], vertices[idx][2])
-        gl.glEnd()
-        gl.glPolygonMode(gl.GL_FRONT_AND_BACK, gl.GL_FILL)
+    def model_matrix(self):
+        import PyQt5.QtGui as QtGui
+        model = QtGui.QMatrix4x4()
+        return model
 
-    def draw_camera_poses(self):
-        """绘制相机位姿"""
-        for extrinsic in self.camera_poses:
-            # 计算相机在世界坐标系中的位置
-            R = extrinsic[:3, :3]
-            t = extrinsic[:3, 3]
-            camera_center = -R.T @ t
-            
-            # 坐标系大小
-            size = 0.1
-            
-            # 计算坐标系方向
-            x_dir = R[:, 0] * size
-            y_dir = R[:, 1] * size
-            z_dir = R[:, 2] * size
-            
-            # 绘制相机坐标系
-            gl.glBegin(gl.GL_LINES)
-            # x轴 - 红色
-            gl.glColor3f(1, 0, 0)
-            gl.glVertex3f(*camera_center)
-            gl.glVertex3f(*(camera_center + x_dir))
-            
-            # y轴 - 绿色
-            gl.glColor3f(0, 1, 0)
-            gl.glVertex3f(*camera_center)
-            gl.glVertex3f(*(camera_center + y_dir))
-            
-            # z轴 - 蓝色
-            gl.glColor3f(0, 0, 1)
-            gl.glVertex3f(*camera_center)
-            gl.glVertex3f(*(camera_center + z_dir))
-            gl.glEnd()
+    def view_matrix(self):
+        import PyQt5.QtGui as QtGui
+        view = QtGui.QMatrix4x4()
+        # 平移
+        view.translate(self.camera_translation[0], self.camera_translation[1], -self.camera_distance)
+        # 先绕X轴再绕Y轴
+        view.rotate(self.camera_rotation_x, 1, 0, 0)
+        view.rotate(self.camera_rotation_y, 0, 1, 0)
+        return view
 
     def set_point_cloud(self, points, colors):
-        """设置点云数据"""
-        # 计算点云中心并调整位置
+        # 归一化和中心化
         if len(points) > 0:
             center = np.mean(points, axis=0)
-            # 将点云移动到原点附近
             points = points - center
         else:
             center = np.array([0, 0, 0])
-        
+
         self.point_cloud = {
             'points': points,
             'colors': colors,
             'center': center
         }
+        self.update_pointcloud_vbo(points, colors)
         self.update()
 
+    def update_pointcloud_vbo(self, points, colors):
+        # 清理旧的
+        if self.vbo_point:
+            self.vbo_point.destroy()
+            self.vbo_point = None
+        if self.vao_point:
+            self.vao_point.destroy()
+            self.vao_point = None
+
+        if points is None or len(points) == 0:
+            self.n_points = 0
+            return
+
+        # 合并到一个数组：N,6
+        vertex_data = np.hstack([points.astype(np.float32), colors.astype(np.float32)])
+        self.n_points = len(points)
+        
+        # 确保在OpenGL上下文中创建对象
+        self.makeCurrent()
+        
+        self.vao_point = QOpenGLVertexArrayObject()
+        self.vao_point.create()
+        self.vao_point.bind()
+        
+        self.vbo_point = QOpenGLBuffer(QOpenGLBuffer.VertexBuffer)
+        self.vbo_point.create()
+        self.vbo_point.bind()
+        self.vbo_point.allocate(vertex_data.tobytes(), vertex_data.nbytes)
+
+        # 设置属性
+        gl.glEnableVertexAttribArray(0)
+        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, 24, gl.ctypes.c_void_p(0))
+        gl.glEnableVertexAttribArray(1)
+        gl.glVertexAttribPointer(1, 3, gl.GL_FLOAT, gl.GL_FALSE, 24, gl.ctypes.c_void_p(12))
+
+        self.vbo_point.release()
+        self.vao_point.release()
+        
+        # 确保操作完成
+        self.doneCurrent()
+
     def set_mesh(self, vertices, triangles, colors=None):
-        """设置网格数据"""
         if colors is None:
             colors = np.ones_like(vertices) * 0.7
-            
-        # 计算网格中心并调整位置
         if len(vertices) > 0:
             center = np.mean(vertices, axis=0)
-            # 将网格移动到原点附近
             vertices = vertices - center
         else:
             center = np.array([0, 0, 0])
-        
         self.mesh = {
             'vertices': vertices,
             'triangles': triangles,
             'colors': colors,
             'center': center
         }
+        self.update_mesh_vbo(vertices, triangles, colors)
         self.update()
+
+    def update_mesh_vbo(self, vertices, triangles, colors):
+        if self.vbo_mesh:
+            self.vbo_mesh.destroy()
+            self.vbo_mesh = None
+        if self.vao_mesh:
+            self.vao_mesh.destroy()
+            self.vao_mesh = None
+
+        if vertices is None or len(vertices) == 0 or triangles is None or len(triangles) == 0:
+            self.n_mesh_indices = 0
+            return
+
+        # 将三角形顶点展开为N*3行，每行6个float
+        flat_vertices = vertices[triangles.reshape(-1)]
+        flat_colors = colors[triangles.reshape(-1)]
+        vertex_data = np.hstack([flat_vertices.astype(np.float32), flat_colors.astype(np.float32)])
+        self.n_mesh_indices = len(flat_vertices)
+        
+        # 确保在OpenGL上下文中创建对象
+        self.makeCurrent()
+        
+        self.vao_mesh = QOpenGLVertexArrayObject()
+        self.vao_mesh.create()
+        self.vao_mesh.bind()
+        
+        self.vbo_mesh = QOpenGLBuffer(QOpenGLBuffer.VertexBuffer)
+        self.vbo_mesh.create()
+        self.vbo_mesh.bind()
+        self.vbo_mesh.allocate(vertex_data.tobytes(), vertex_data.nbytes)
+
+        # 设置属性
+        gl.glEnableVertexAttribArray(0)
+        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, 24, gl.ctypes.c_void_p(0))
+        gl.glEnableVertexAttribArray(1)
+        gl.glVertexAttribPointer(1, 3, gl.GL_FLOAT, gl.GL_FALSE, 24, gl.ctypes.c_void_p(12))
+
+        self.vbo_mesh.release()
+        self.vao_mesh.release()
+        
+        # 确保操作完成
+        self.doneCurrent()
 
     def set_camera_poses(self, extrinsics):
-        """设置相机位姿"""
         self.camera_poses = extrinsics
+        self.update_cameras_vbo(extrinsics)  # 更新相机位姿的VBO
         self.update()
 
+    def update_cameras_vbo(self, extrinsics):
+        """更新相机位姿的VBO"""
+        # 清理旧的
+        if self.vbo_cameras:
+            self.vbo_cameras.destroy()
+            self.vbo_cameras = None
+        if self.vao_cameras:
+            self.vao_cameras.destroy()
+            self.vao_cameras = None
+
+        if extrinsics is None or len(extrinsics) == 0:
+            self.n_camera_vertices = 0
+            return
+
+        # 创建顶点数据数组
+        vertices = []
+        for extrinsic in extrinsics:
+            R = extrinsic[:3, :3]
+            t = extrinsic[:3, 3]
+            camera_center = -R.T @ t
+            size = 0.1
+            x_dir = R[:, 0] * size
+            y_dir = R[:, 1] * size
+            z_dir = R[:, 2] * size
+            
+            # 每个相机位姿需要6个顶点（3条线）
+            # X轴 (红色)
+            vertices.extend([camera_center[0], camera_center[1], camera_center[2], 1.0, 0.0, 0.0])
+            vertices.extend([camera_center[0] + x_dir[0], camera_center[1] + x_dir[1], camera_center[2] + x_dir[2], 1.0, 0.0, 0.0])
+            
+            # Y轴 (绿色)
+            vertices.extend([camera_center[0], camera_center[1], camera_center[2], 0.0, 1.0, 0.0])
+            vertices.extend([camera_center[0] + y_dir[0], camera_center[1] + y_dir[1], camera_center[2] + y_dir[2], 0.0, 1.0, 0.0])
+            
+            # Z轴 (蓝色)
+            vertices.extend([camera_center[0], camera_center[1], camera_center[2], 0.0, 0.0, 1.0])
+            vertices.extend([camera_center[0] + z_dir[0], camera_center[1] + z_dir[1], camera_center[2] + z_dir[2], 0.0, 0.0, 1.0])
+        
+        vertices = np.array(vertices, dtype=np.float32)
+        self.n_camera_vertices = len(vertices) // 6  # 每个顶点6个值
+        
+        # 确保在OpenGL上下文中创建对象
+        self.makeCurrent()
+        
+        # 创建VAO和VBO
+        self.vao_cameras = QOpenGLVertexArrayObject()
+        self.vao_cameras.create()
+        self.vao_cameras.bind()
+        
+        self.vbo_cameras = QOpenGLBuffer(QOpenGLBuffer.VertexBuffer)
+        self.vbo_cameras.create()
+        self.vbo_cameras.bind()
+        self.vbo_cameras.allocate(vertices.tobytes(), vertices.nbytes)
+        
+        # 设置顶点属性
+        gl.glEnableVertexAttribArray(0)
+        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, 24, gl.ctypes.c_void_p(0))
+        gl.glEnableVertexAttribArray(1)
+        gl.glVertexAttribPointer(1, 3, gl.GL_FLOAT, gl.GL_FALSE, 24, gl.ctypes.c_void_p(12))
+        
+        self.vbo_cameras.release()
+        self.vao_cameras.release()
+        
+        # 确保操作完成
+        self.doneCurrent()
+
     def reset_view(self):
-        """重置视图"""
         self.camera_distance = 5.0
         self.camera_rotation_x = 0.0
         self.camera_rotation_y = 0.0
@@ -314,40 +425,61 @@ class OpenGLRenderer(QOpenGLWidget):
         self.update()
         
     def clear_scene(self):
-        """清除当前场景中的所有对象"""
         self.point_cloud = None
         self.mesh = None
         self.camera_poses = None
         self.reset_view()
-        self.update_status = "场景已清除"  # 状态信息
+        
+        # 确保在OpenGL上下文中释放资源
+        self.makeCurrent()
+        
+        # 清除VBO
+        if self.vbo_point:
+            self.vbo_point.destroy()
+            self.vbo_point = None
+        if self.vao_point:
+            self.vao_point.destroy()
+            self.vao_point = None
+        if self.vbo_mesh:
+            self.vbo_mesh.destroy()
+            self.vbo_mesh = None
+        if self.vao_mesh:
+            self.vao_mesh.destroy()
+            self.vao_mesh = None
+        if self.vbo_cameras:
+            self.vbo_cameras.destroy()
+            self.vbo_cameras = None
+        if self.vao_cameras:
+            self.vao_cameras.destroy()
+            self.vao_cameras = None
+        
+        self.doneCurrent()
+        
+        self.n_points = 0
+        self.n_mesh_indices = 0
+        self.n_camera_vertices = 0
         self.update()
 
     def mousePressEvent(self, event):
-        """鼠标按下事件"""
         self.last_mouse_pos = event.pos()
 
     def mouseMoveEvent(self, event):
-        """鼠标移动事件"""
         if self.last_mouse_pos is None:
             return
-            
         dx = event.x() - self.last_mouse_pos.x()
         dy = event.y() - self.last_mouse_pos.y()
-        
+        if abs(dx) < 1 and abs(dy) < 1:
+            return  # 忽略微小移动，提高流畅度
         if event.buttons() & Qt.LeftButton:
-            # 旋转
             self.camera_rotation_x += dy * self.rotation_sensitivity
             self.camera_rotation_y += dx * self.rotation_sensitivity
         elif event.buttons() & Qt.RightButton:
-            # 平移
             self.camera_translation[0] += dx * self.translation_sensitivity
             self.camera_translation[1] -= dy * self.translation_sensitivity
-        
         self.last_mouse_pos = event.pos()
         self.update()
 
     def wheelEvent(self, event):
-        """鼠标滚轮事件 - 缩放"""
         delta = event.angleDelta().y()
         self.camera_distance += delta * self.zoom_sensitivity * -0.1
         self.camera_distance = max(0.1, min(self.camera_distance, 50.0))
