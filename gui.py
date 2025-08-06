@@ -2,7 +2,7 @@
 Description: 3D可视化工具 - 使用PyOpenGL嵌入渲染
 Author: Damocles_lin
 Date: 2025-07-29 20:27:35
-LastEditTime: 2025-08-04 00:38:29
+LastEditTime: 2025-08-06 15:54:41
 LastEditors: Damocles_lin
 '''
 import sys
@@ -745,51 +745,70 @@ class MainWindow(QMainWindow):
         try:
             data = load_colmap_data(file_path)
             
-            # 创建选择对话框
-            choice = QMessageBox.question(
-                self,
-                "选择可视化类型",
-                "请选择要可视化的内容:",
-                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
-                QMessageBox.Yes
-            )
+            # 1. 创建自定义对话框
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("选择可视化类型")  # 标题
+            msg_box.setText("请选择要可视化的内容:")  # 提示文本
+            msg_box.setIcon(QMessageBox.Question)  # 问号图标
             
-            if choice == QMessageBox.Cancel:
+            # 2. 创建三个自定义按钮（中文文本）
+            btn_point_cloud = QPushButton("点云（含相机位姿）")
+            btn_mesh = QPushButton("网格")
+            btn_cancel = QPushButton("取消")
+            
+            # 3. 将按钮添加到对话框
+            msg_box.addButton(btn_point_cloud, QMessageBox.YesRole)
+            msg_box.addButton(btn_mesh, QMessageBox.NoRole)
+            msg_box.addButton(btn_cancel, QMessageBox.RejectRole)
+            
+            # 4. 设置默认选中"点云"按钮
+            msg_box.setDefaultButton(btn_point_cloud)
+            
+            # 5. 显示对话框并获取用户选择
+            msg_box.exec_()
+            
+            # 6. 判断用户点击的按钮
+            clicked_btn = msg_box.clickedButton()
+            
+            if clicked_btn == btn_cancel:
                 self.update_status("操作取消")
                 return
-                
-            if choice == QMessageBox.Yes and 'points' in data and data['points'].size > 0:
-                # 可视化点云
-                points = data['points']
-                colors = data.get('colors', np.ones_like(points) * 0.7)
-                
-                # 获取相机位姿
-                extrinsics = [img['extrinsic'] for img in data['images'].values()]
-                
-                # 设置到OpenGL渲染器
-                self.gl_widget.set_point_cloud(points, colors)
-                self.gl_widget.set_camera_poses(extrinsics)
-                self.gl_widget.reset_view()
-                
-                self.update_status(f"可视化点云: {os.path.basename(file_path)}")
-                self.update_status(f"点数: {len(points):,}, 相机数: {len(extrinsics)}")
-            
-            elif choice == QMessageBox.No and 'vertices' in data and data['vertices'] is not None:
-                # 可视化网格
-                vertices = data['vertices']
-                triangles = data['triangles']
-                colors = data.get('vertex_colors', np.ones_like(vertices) * 0.7)
-                
-                # 设置到OpenGL渲染器
-                self.gl_widget.set_mesh(vertices, triangles, colors)
-                self.gl_widget.reset_view()
-                
-                self.update_status(f"可视化网格: {os.path.basename(file_path)}")
-                self.update_status(f"顶点数: {len(vertices):,}, 面片数: {len(triangles):,}")
-            else:
-                self.update_status("错误: 没有可用的可视化数据")
-                QMessageBox.warning(self, "错误", "重建数据中没有点云或网格信息")
-                return
+            elif clicked_btn == btn_point_cloud:    
+                if 'points' in data and data['points'].size > 0:
+                    # 可视化点云
+                    points = data['points']
+                    colors = data.get('colors', np.ones_like(points) * 0.7)
+                    
+                    # 获取相机位姿
+                    extrinsics = [img['extrinsic'] for img in data['images'].values()]
+                    
+                    # 设置到OpenGL渲染器
+                    self.gl_widget.set_point_cloud(points, colors)
+                    self.gl_widget.set_camera_poses(extrinsics)
+                    self.gl_widget.reset_view()
+                    
+                    self.update_status(f"可视化点云: {os.path.basename(file_path)}")
+                    self.update_status(f"点数: {len(points):,}, 相机数: {len(extrinsics)}")
+                else:
+                    self.update_status("错误: 没有可用的点云数据")
+                    QMessageBox.warning(self, "错误", "重建数据中没有点云信息")
+            elif clicked_btn == btn_mesh:
+                if 'vertices' in data and data['vertices'] is not None:
+                    # 可视化网格
+                    vertices = data['vertices']
+                    triangles = data['triangles']
+                    colors = data.get('vertex_colors', np.ones_like(vertices) * 0.7)
+                    
+                    # 设置到OpenGL渲染器
+                    self.gl_widget.set_mesh(vertices, triangles, colors)
+                    self.gl_widget.reset_view()
+                    
+                    self.update_status(f"可视化网格: {os.path.basename(file_path)}")
+                    self.update_status(f"顶点数: {len(vertices):,}, 面片数: {len(triangles):,}")
+                else:
+                    self.update_status("错误: 没有可用的网格数据")
+                    QMessageBox.warning(self, "错误", "重建数据中没有网格信息")
+                    return
             
         except Exception as e:
             self.update_status(f"错误: {str(e)}")
@@ -832,22 +851,6 @@ def run_gui():
     """启动GUI应用程序"""
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    
-    # 设置全局样式
-    palette = QPalette()
-    palette.setColor(QPalette.Window, QColor(240, 240, 240))
-    palette.setColor(QPalette.WindowText, QColor(50, 50, 50))
-    palette.setColor(QPalette.Base, QColor(255, 255, 255))
-    palette.setColor(QPalette.AlternateBase, QColor(240, 240, 240))
-    palette.setColor(QPalette.ToolTipBase, QColor(255, 255, 255))
-    palette.setColor(QPalette.ToolTipText, QColor(50, 50, 50))
-    palette.setColor(QPalette.Text, QColor(50, 50, 50))
-    palette.setColor(QPalette.Button, QColor(240, 240, 240))
-    palette.setColor(QPalette.ButtonText, QColor(50, 50, 50))
-    palette.setColor(QPalette.BrightText, QColor(255, 0, 0))
-    palette.setColor(QPalette.Highlight, QColor(52, 152, 219))
-    palette.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
-    app.setPalette(palette)
     
     window = MainWindow()
     window.show()
