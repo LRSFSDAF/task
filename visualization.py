@@ -1,8 +1,8 @@
 '''
-Description: 
+Description: 支持点云、网格模型和相机位姿的可视化
 Author: Damocles_lin
 Date: 2025-07-29 20:26:58
-LastEditTime: 2025-08-03 21:27:10
+LastEditTime: 2025-08-06 19:52:08
 LastEditors: Damocles_lin
 '''
 import os

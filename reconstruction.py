@@ -1,8 +1,8 @@
 '''
-Description: 
+Description: 使用COLMAP进行稀疏重建和稠密重建
 Author: Damocles_lin
 Date: 2025-07-29 20:25:16
-LastEditTime: 2025-08-01 12:38:50
+LastEditTime: 2025-08-06 19:51:48
 LastEditors: Damocles_lin
 '''
 import os
